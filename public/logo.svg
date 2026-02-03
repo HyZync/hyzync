@@ -1,0 +1,29 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#4c1d95;stop-opacity:1" /> <!-- Deep Violet -->
+      <stop offset="100%" style="stop-color:#2e1065;stop-opacity:1" /> <!-- Darker Violet -->
+    </linearGradient>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="15" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs>
+
+  <!-- Background: Smooth Rounded Square -->
+  <rect x="0" y="0" width="512" height="512" rx="120" fill="url(#bgGrad)" />
+
+  <!-- Accent Circle (Subtle Halo) -->
+  <circle cx="256" cy="256" r="140" fill="#8b5cf6" fill-opacity="0.2" />
+
+  <!-- Icon: Sharp 4-Pointed Star (The "North Star" / AI Spark) -->
+  <path d="M256 96 C256 96 296 216 296 216 C296 216 416 256 416 256 C416 256 296 296 296 296 C296 296 256 416 256 416 C256 416 216 296 216 296 C216 296 96 256 96 256 C96 256 216 216 216 216 C216 216 256 96 256 96 Z" 
+        fill="white" 
+        filter="url(#glow)" 
+  />
+  
+  <!-- Solid Core for Crispness at Small Sizes -->
+  <path d="M256 128 C256 128 286 226 286 226 C286 226 384 256 384 256 C384 256 286 286 286 286 C286 286 256 384 256 384 C256 384 226 286 226 286 C226 286 128 256 128 256 C128 256 226 226 226 226 C226 226 256 128 256 128 Z" 
+        fill="white" 
+  />
+</svg>
