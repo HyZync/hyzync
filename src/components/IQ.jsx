@@ -73,12 +73,12 @@ const REGIONS = [
 
 const StatCard = ({ icon: Icon, label, value, color }) => (
     <motion.div
-        whileHover={{ y: -5, skewX: -3, borderColor: '#00D2BE' }}
+        whileHover={{ y: -5, skewX: -3, borderColor: '#3B82F6' }}
         className="bg-zinc-900/90 backdrop-blur-md border border-white/10 rounded-xl p-5 flex items-center gap-5 group relative overflow-hidden shadow-2xl transition-all"
     >
         <div className="absolute inset-0 bg-gradient-to-br from-white/[0.02] to-transparent pointer-events-none"></div>
-        <div className={`p-3 rounded-lg bg-[#00D2BE]/10 border border-[#00D2BE]/20 group-hover:bg-[#00D2BE]/20 transition-all`}>
-            <Icon size={20} className="text-[#00D2BE]" />
+        <div className={`p-3 rounded-lg bg-[#3B82F6]/10 border border-[#3B82F6]/20 group-hover:bg-[#3B82F6]/20 transition-all`}>
+            <Icon size={20} className="text-[#3B82F6]" />
         </div>
         <div>
             <div className="text-zinc-500 text-[10px] uppercase tracking-[0.4em] mb-1 font-black italic">{label}</div>
@@ -100,11 +100,11 @@ const RacingLines = () => (
                 <motion.path
                     key={i}
                     d={`M ${-200} ${80 + i * 120} L ${1200} ${200 + i * 120}`}
-                    stroke={i % 3 === 0 ? "#00D2BE" : (i % 3 === 1 ? "#E0E0E0" : "#ffffff")}
+                    stroke={i % 3 === 0 ? "#06B6D4" : (i % 3 === 1 ? "#3B82F6" : "#A855F7")}
                     strokeWidth={i % 2 === 0 ? "4" : "2"}
                     fill="none"
                     initial={{ pathLength: 0, opacity: 0 }}
-                    animate={{ pathLength: 1, opacity: [0, 0.8, 0] }}
+                    animate={{ pathLength: 1, opacity: [0, 0.4, 0] }}
                     transition={{
                         duration: 1.5 + i * 0.3,
                         repeat: Infinity,
@@ -115,8 +115,8 @@ const RacingLines = () => (
             ))}
         </svg>
 
-        {/* Red glow at top */}
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full h-[600px] bg-gradient-to-b from-[#00D2BE]/15 to-transparent opacity-60"></div>
+        {/* Purple glow at top */}
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full h-[600px] bg-gradient-to-b from-[#A855F7]/10 to-transparent opacity-60"></div>
 
         {/* Checkered flag corner effect */}
         <div className="absolute top-0 right-0 w-32 h-32 opacity-10">
@@ -127,17 +127,17 @@ const RacingLines = () => (
         </div>
 
         {/* Bottom racing stripe */}
-        <div className="absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-[#00D2BE] to-transparent opacity-50"></div>
+        <div className="absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-[#3B82F6] to-transparent opacity-50"></div>
     </div>
 );
 
 const ModuleButton = ({ icon: Icon, label, active, count, onClick }) => (
     <button
         onClick={onClick}
-        className={`flex items-center gap-3 px-6 py-3 rounded-xl transition-all duration-300 relative group overflow-hidden border ${active ? 'bg-[#00D2BE] border-[#00D2BE] text-white shadow-[0_0_20px_rgba(232,0,32,0.4)]' : 'bg-black/40 text-zinc-500 hover:bg-zinc-900 hover:text-white border-white/10'}`}
+        className={`flex items-center gap-3 px-6 py-3 rounded-xl transition-all duration-300 relative group overflow-hidden border ${active ? 'bg-gradient-to-r from-[#A855F7] to-[#3B82F6] border-white/20 text-white shadow-[0_0_20px_rgba(168,85,247,0.4)]' : 'bg-black/40 text-zinc-500 hover:bg-zinc-900 hover:text-white border-white/10'}`}
     >
         <div className="relative z-10 flex items-center gap-3">
-            <Icon size={18} className={`${active ? 'text-white' : 'text-[#00D2BE] group-hover:scale-110 transition-transform'}`} />
+            <Icon size={18} className={`${active ? 'text-white' : 'text-[#3B82F6] group-hover:scale-110 transition-transform'}`} />
             <span className="text-xs font-black italic uppercase tracking-widest">{label}</span>
             {count !== undefined && (
                 <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${active ? 'bg-white/20 text-white' : 'bg-zinc-800 text-zinc-500'}`}>
@@ -198,11 +198,11 @@ const InfrastructureCard = ({ type, data, activeRegion }) => {
 
     return (
         <motion.div
-            whileHover={{ y: -10, rotateX: 2, borderColor: '#00D2BE' }}
-            className="group relative bg-[#08080a] border-2 border-white/10 rounded-2xl p-8 overflow-hidden flex flex-col h-full transition-all duration-300 shadow-[0_20px_50px_rgba(0,0,0,0.5)] hover:shadow-[#00D2BE]/20"
+            whileHover={{ y: -10, rotateX: 2, borderColor: '#3B82F6' }}
+            className="group relative bg-[#08080a] border-2 border-white/10 rounded-2xl p-8 overflow-hidden flex flex-col h-full transition-all duration-300 shadow-[0_20px_50px_rgba(0,0,0,0.5)] hover:shadow-[#3B82F6]/20"
         >
-            {/* Ferrari Rosso Corsa Accent Bar */}
-            <div className="absolute top-0 left-0 w-full h-1.5 bg-[#00D2BE] shadow-[0_2px_10px_rgba(232,0,32,0.4)]"></div>
+            {/* Intelligence Gradient Accent Bar */}
+            <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-[#A855F7] via-[#3B82F6] to-[#06B6D4] shadow-[0_2px_10px_rgba(59,130,246,0.4)]"></div>
             <div className="absolute inset-0 bg-gradient-to-br from-white/[0.02] to-transparent pointer-events-none"></div>
 
             {/* Header */}
@@ -225,7 +225,7 @@ const InfrastructureCard = ({ type, data, activeRegion }) => {
                     <div className="text-3xl font-black text-white italic leading-none mb-1 tracking-tighter group-hover:scale-110 transition-transform origin-right">
                         {displayPrice === 'Custom' ? 'Custom' : `${region.symbol}${displayPrice}`}
                     </div>
-                    <div className="text-[10px] text-[#00D2BE] font-black uppercase tracking-[0.3em] italic">Credits / HR</div>
+                    <div className="text-[10px] text-[#06B6D4] font-black uppercase tracking-[0.3em] italic">Credits / HR</div>
                 </div>
             </div>
 
@@ -252,7 +252,7 @@ const InfrastructureCard = ({ type, data, activeRegion }) => {
                     </span>
                 </button>
                 <div className="mt-4 text-[9px] text-center text-zinc-500 font-black uppercase tracking-[0.4em] italic opacity-80 flex items-center justify-center gap-2">
-                    <Activity size={10} className="text-[#00D2BE]" />
+                    <Activity size={10} className="text-[#3B82F6]" />
                     PRECISION LAUNCH Q1 2026
                 </div>
             </div>
@@ -293,15 +293,15 @@ const IQ = () => {
                         animate={{ opacity: 1, x: 0 }}
                         className="space-y-4"
                     >
-                        <div className="inline-flex items-center gap-3 px-5 py-2 rounded-lg bg-black border border-[#00D2BE]/30 text-[10px] text-white font-black uppercase tracking-[0.5em] italic shadow-[0_0_20px_rgba(232,0,32,0.1)]">
-                            <Activity size={14} className="text-[#00D2BE] animate-pulse" /> Telemetry Active
+                        <div className="inline-flex items-center gap-3 px-5 py-2 rounded-lg bg-black border border-[#3B82F6]/30 text-[10px] text-white font-black uppercase tracking-[0.5em] italic shadow-[0_0_20px_rgba(59,130,246,0.1)]">
+                            <Activity size={14} className="text-[#06B6D4] animate-pulse" /> Telemetry Active
                         </div>
-                        <h1 className="text-8xl md:text-[13rem] font-black italic tracking-tighter leading-none text-transparent bg-clip-text bg-gradient-to-b from-white via-white to-[#00D2BE] filter drop-shadow-[0_10px_30px_rgba(232,0,32,0.2)]">
-                            IQ<span className="text-[#00D2BE]">.</span>
+                        <h1 className="text-8xl md:text-[13rem] font-black italic tracking-tighter leading-none text-transparent bg-clip-text bg-gradient-to-b from-white via-white to-[#06B6D4] filter drop-shadow-[0_10px_30px_rgba(59,130,246,0.2)]">
+                            IQ<span className="text-transparent bg-clip-text bg-gradient-to-r from-[#A855F7] to-[#06B6D4]">.</span>
                         </h1>
                         <p className="text-zinc-400 max-w-2xl mx-auto text-lg md:text-xl font-black italic uppercase tracking-[0.2em] opacity-90 leading-relaxed">
                             <span className="text-white">Ultra-Performance</span> Neural Infrastructure. <br />
-                            Precision Engineered for the <span className="text-[#00D2BE]">PERFORMANCE</span> Generation of AI.
+                            Precision Engineered for the <span className="text-[#3B82F6]">PERFORMANCE</span> Generation of AI.
                         </p>
                     </motion.div>
 
@@ -315,11 +315,11 @@ const IQ = () => {
                         {[0, 1, 2, 3, 4].map((i) => (
                             <motion.div
                                 key={i}
-                                className="w-4 h-4 rounded-full border-2 border-[#00D2BE]/50"
+                                className="w-4 h-4 rounded-full border-2 border-[#3B82F6]/50"
                                 initial={{ backgroundColor: 'transparent' }}
                                 animate={{
-                                    backgroundColor: ['transparent', '#00D2BE', '#00D2BE', 'transparent'],
-                                    boxShadow: ['0 0 0 rgba(232,0,32,0)', '0 0 20px rgba(232,0,32,0.8)', '0 0 20px rgba(232,0,32,0.8)', '0 0 0 rgba(232,0,32,0)']
+                                    backgroundColor: ['transparent', '#3B82F6', '#06B6D4', 'transparent'],
+                                    boxShadow: ['0 0 0 rgba(59,130,246,0)', '0 0 20px rgba(6,182,212,0.8)', '0 0 20px rgba(6,182,212,0.8)', '0 0 0 rgba(59,130,246,0)']
                                 }}
                                 transition={{
                                     duration: 4,
@@ -408,11 +408,11 @@ const IQ = () => {
                             </p>
                         </div>
                         <div className="relative w-full md:w-96">
-                            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-[#00D2BE]" size={16} />
+                            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-[#3B82F6]" size={16} />
                             <input
                                 type="text"
                                 placeholder="FILTER BY ENGINE SPEC..."
-                                className="w-full bg-black border-2 border-white/5 rounded-xl py-4 pl-12 pr-4 text-[11px] font-black tracking-[0.3em] uppercase focus:outline-none focus:border-[#00D2BE] transition-all placeholder:text-zinc-700 italic text-white shadow-2xl"
+                                className="w-full bg-black border-2 border-white/5 rounded-xl py-4 pl-12 pr-4 text-[11px] font-black tracking-[0.3em] uppercase focus:outline-none focus:border-[#3B82F6] transition-all placeholder:text-zinc-700 italic text-white shadow-2xl"
                             />
                         </div>
                     </div>
@@ -458,7 +458,7 @@ const IQ = () => {
                         className="text-zinc-400 hover:text-white transition-colors text-sm font-bold uppercase tracking-[0.2em] flex items-center justify-center gap-3 mx-auto group"
                     >
                         <span>Know where are you now on retention</span>
-                        <ChevronRight size={14} className="group-hover:translate-x-1 transition-transform text-[#00D2BE]" />
+                        <ChevronRight size={14} className="group-hover:translate-x-1 transition-transform text-[#3B82F6]" />
                     </button>
                 </div>
 

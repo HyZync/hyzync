@@ -15,7 +15,8 @@ import {
     Layers,
     ChevronDown,
     Activity,
-    Sparkles
+    Sparkles,
+    Quote
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
@@ -210,58 +211,99 @@ const Academy = () => {
                 </div>
             </section>
 
-            {/* --- PLAYBOOK SECTION (Spotlight Cards) --- */}
+            {/* --- PLAYBOOK SECTION (Spotlight Cards with Insights Sidebar) --- */}
             <section className="py-40 px-6">
                 <div className="max-w-7xl mx-auto">
-                    <div className="mb-24 px-4">
-                        <h2 className="text-4xl md:text-7xl font-extralight text-white mb-8 tracking-tighter">How to Stop Churn</h2>
-                        <p className="text-xl text-slate-400 max-w-2xl font-light leading-relaxed">
-                            Five simple rules to turn "users" into "loyalists".
-                        </p>
-                    </div>
+                    <div className="flex flex-col lg:flex-row gap-16 lg:gap-24">
 
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 lg:gap-8">
-                        <SpotlightCard
-                            icon={Zap}
-                            title="1. Speed to Value"
-                            desc="Don't make them wait. Deliver the first 'Aha!' moment in under 5 minutes."
-                        />
-                        <SpotlightCard
-                            icon={Activity}
-                            title="2. Catch the Drift"
-                            desc="Users fade before they quit. Monitor login drops to predict churn early."
-                        />
-                        <SpotlightCard
-                            icon={MessageCircle}
-                            title="3. Close the Loop"
-                            desc="Reply to feedback fast. Even a 'No' is better than silence."
-                        />
-                        <SpotlightCard
-                            icon={Target}
-                            title="4. Exit Interviews"
-                            desc="Find out why they left. Was it price? Product? Support? Ask them."
-                        />
-                        <SpotlightCard
-                            icon={Shield}
-                            title="5. Assign Ownership"
-                            desc="Make one person responsible for the Retention number. Give them power."
-                        />
-
-                        {/* Call to Action Card */}
-                        <div
-                            className="bg-white text-black p-10 rounded-[2rem] flex flex-col justify-between group cursor-pointer hover:scale-[1.02] transition-all shadow-[0_0_40px_rgba(255,255,255,0.15)] relative overflow-hidden"
-                            onClick={() => navigate('/#contact')}
-                        >
-                            <div className="relative z-10">
-                                <h3 className="text-3xl font-light tracking-tight mb-4">Need Help?</h3>
-                                <p className="text-slate-600 font-light leading-relaxed text-lg">Get a full Hyzync audit of your retention strategy.</p>
-                            </div>
-                            <div className="flex items-center gap-3 font-medium mt-10 relative z-10">
-                                Book Audit <ArrowRight size={20} className="group-hover:translate-x-1 transition-transform" />
+                        {/* LEFT: Rules Grid */}
+                        <div className="flex-1">
+                            <div className="mb-20 px-4">
+                                <h2 className="text-4xl md:text-7xl font-extralight text-white mb-8 tracking-tighter">How to Stop Churn</h2>
+                                <p className="text-xl text-slate-400 max-w-xl font-light leading-relaxed">
+                                    Five simple rules to turn "users" into "loyalists".
+                                </p>
                             </div>
 
-                            {/* Subtle Shine Effect on Hover */}
-                            <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-700 pointer-events-none"></div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <SpotlightCard
+                                    icon={Zap}
+                                    title="1. Speed to Value"
+                                    desc="Don't make them wait. Deliver the first 'Aha!' moment in under 5 minutes."
+                                />
+                                <SpotlightCard
+                                    icon={Activity}
+                                    title="2. Catch the Drift"
+                                    desc="Users fade before they quit. Monitor login drops to predict churn early."
+                                />
+                                <SpotlightCard
+                                    icon={MessageCircle}
+                                    title="3. Close the Loop"
+                                    desc="Reply to feedback fast. Even a 'No' is better than silence."
+                                />
+                                <SpotlightCard
+                                    icon={Target}
+                                    title="4. Exit Interviews"
+                                    desc="Find out why they left. Was it price? Product? Support? Ask them."
+                                />
+                                <SpotlightCard
+                                    icon={Shield}
+                                    title="5. Assign Ownership"
+                                    desc="Make one person responsible for the Retention number. Give them power."
+                                />
+
+                                {/* Call to Action Card */}
+                                <div
+                                    className="bg-white text-black p-8 rounded-[2rem] flex flex-col justify-between group cursor-pointer hover:scale-[1.02] transition-all shadow-[0_40px_80px_rgba(0,0,0,0.5)] relative overflow-hidden"
+                                    onClick={() => navigate('/#contact')}
+                                >
+                                    <div className="relative z-10">
+                                        <h3 className="text-2xl font-light tracking-tight mb-4">Need Help?</h3>
+                                        <p className="text-slate-600 font-light leading-relaxed text-base">Get a full Hyzync audit of your retention strategy.</p>
+                                    </div>
+                                    <div className="flex items-center gap-3 font-medium mt-10 relative z-10">
+                                        Book Audit <ArrowRight size={20} className="group-hover:translate-x-1 transition-transform" />
+                                    </div>
+                                    <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-700 pointer-events-none"></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* RIGHT: Insights Sidebar */}
+                        <div className="lg:w-80 flex-shrink-0">
+                            <div className="sticky top-32 space-y-8">
+                                <div className="inline-block px-3 py-1 rounded-sm bg-purple-500/10 border border-purple-500/20 text-purple-400 text-[10px] font-mono uppercase tracking-[0.2em]">
+                                    Market Insights
+                                </div>
+
+                                <div className="group relative bg-white/[0.03] border border-white/5 p-8 rounded-3xl overflow-hidden hover:border-purple-500/30 transition-all duration-500">
+                                    <Quote size={24} className="text-purple-500/30 mb-6" />
+                                    <p className="text-lg md:text-xl font-light text-slate-300 leading-relaxed mb-8 tracking-tight">
+                                        "the retained customers usually <span className="text-white font-normal underline decoration-purple-500/50 underline-offset-4">boosts the nps</span> improving the public sentiment about the product or service thereby attracting more customers in <span className="text-emerald-400 font-medium italic">less cac</span>."
+                                    </p>
+
+                                    <div className="pt-6 border-t border-white/5">
+                                        <div className="flex items-center gap-3 mb-2">
+                                            <BarChart2 size={16} className="text-purple-400" />
+                                            <span className="text-xs font-medium text-white">Survey 2025 AI61</span>
+                                        </div>
+                                        <div className="text-[9px] font-mono text-slate-500 uppercase tracking-widest pl-7">Hyzync Research</div>
+                                    </div>
+
+                                    {/* Subtle pulse background */}
+                                    <div className="absolute -bottom-10 -right-10 w-32 h-32 bg-purple-500/5 blur-3xl rounded-full group-hover:bg-purple-500/10 transition-all duration-700"></div>
+                                </div>
+
+                                <div className="p-6 rounded-2xl border border-white/5 bg-white/5 backdrop-blur-sm">
+                                    <div className="flex items-center gap-2 mb-3">
+                                        <TrendingUp size={14} className="text-emerald-400" />
+                                        <span className="text-[10px] font-mono text-emerald-400 uppercase tracking-widest">Growth Driver</span>
+                                    </div>
+                                    <p className="text-xs text-slate-500 leading-relaxed italic">
+                                        Retained cohorts generate 2.4x more organic referrals than new acquisitions.
+                                    </p>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
