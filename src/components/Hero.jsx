@@ -207,7 +207,7 @@ const Hero = () => {
                             transition={{ duration: 0.6, delay: 0.1 }}
                             className="block"
                         >
-                            Stop Churn
+                            Stop AI Churn
                         </motion.span>
                         <motion.span
                             initial={{ opacity: 0, y: 20 }}

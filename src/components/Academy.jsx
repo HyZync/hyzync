@@ -16,7 +16,8 @@ import {
     ChevronDown,
     Activity,
     Sparkles,
-    Quote
+    Quote,
+    Award
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
@@ -51,7 +52,7 @@ const Academy = () => {
                         </div>
 
                         <h1 className="text-6xl md:text-9xl font-light tracking-tighter text-white mb-10 leading-[1]">
-                            The math of <br />
+                            The science of <br />
                             {/* Shimmer Effect Text */}
                             <span className="text-transparent bg-clip-text bg-gradient-to-r from-purple-300 via-white to-purple-300 font-medium bg-[length:200%_auto] animate-text-shimmer">
                                 retention.
@@ -464,6 +465,23 @@ const RealityCheckInterface = () => {
                 <div className={`px-10 py-4 rounded-full font-medium border backdrop-blur-md ${status.color} ${status.bg} tracking-widest uppercase text-sm shadow-[0_0_30px_rgba(0,0,0,0.2)] transition-all duration-300`}>
                     {status.label}
                 </div>
+
+                {/* C1 Badge Eligibility Message */}
+                <AnimatePresence>
+                    {score >= 5 && (
+                        <motion.div
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -10 }}
+                            className="mt-8 flex items-center gap-3 px-6 py-3 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 animate-pulse-slow"
+                        >
+                            <Award size={20} className="text-emerald-400" />
+                            <span className="text-sm font-medium tracking-wide">
+                                Eligible for Customer First Badge
+                            </span>
+                        </motion.div>
+                    )}
+                </AnimatePresence>
             </div>
         </div>
     );

@@ -10,9 +10,12 @@ const Navbar = () => {
     const location = useLocation();
     const navigate = useNavigate();
 
+    const [isScrolled, setIsScrolled] = useState(false);
+
     useEffect(() => {
         const handleScroll = () => {
             const currentScrollY = window.scrollY;
+            setIsScrolled(currentScrollY > 300);
 
             if (currentScrollY > lastScrollY && currentScrollY > 100) {
                 setIsVisible(false); // Hide on scroll down
@@ -68,8 +71,16 @@ const Navbar = () => {
     return (
         <nav className="relative w-full flex justify-center pt-4 md:pt-8 z-50">
             <div className="bg-black/40 backdrop-blur-md border border-white/10 rounded-full px-8 py-3 flex items-center gap-8 shadow-2xl">
-                <Link to="/" className="flex items-center">
-                    <img src={logo} alt="Hyzync Logo" className="h-8 w-auto hover:opacity-80 transition-opacity" />
+                <Link to="/" className="flex items-center relative group">
+                    <img src={logo} alt="Hyzync Logo" className={`h-8 w-auto transition-all duration-500 ${isScrolled ? 'opacity-0 scale-50' : 'opacity-100 scale-100'}`} />
+                    {isScrolled && (
+                        <div
+                            onClick={(e) => { e.preventDefault(); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+                            className="absolute inset-0 flex items-center justify-center cursor-pointer text-[10px] font-bold text-white tracking-widest animate-in fade-in zoom-in duration-300"
+                        >
+                            TOP
+                        </div>
+                    )}
                 </Link>
 
                 {/* Desktop Menu */}
@@ -78,9 +89,9 @@ const Navbar = () => {
                         <button
                             key={item.name}
                             onClick={() => handleNavClick(item.path)}
-                            className={`text-sm font-medium transition-all relative group/nav cursor-pointer ${item.special
-                                ? 'text-brand-purple font-bold flex items-center gap-1.5'
-                                : 'text-secondary hover:text-white'
+                            className={`text-[11px] font-bold uppercase tracking-widest transition-all relative group/nav cursor-pointer ${item.special
+                                ? 'text-brand-purple flex items-center gap-1.5'
+                                : 'text-white/40 hover:text-white'
                                 }`}
                         >
                             {item.special ? (

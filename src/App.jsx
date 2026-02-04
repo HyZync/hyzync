@@ -16,6 +16,7 @@ import PromoBanner from './components/PromoBanner';
 import YearProgress from './components/YearProgress';
 import IQ from './components/IQ';
 import Founder from './components/Founder';
+import ScrollToTop from './components/ScrollToTop';
 
 import AdvancedScrollManager from './components/ScrollManager';
 
@@ -24,6 +25,7 @@ function App() {
     <Router>
       <YearProgress />
       <PromoBanner />
+      <ScrollToTop />
       <AdvancedScrollManager />
       <div className="min-h-screen bg-background text-white selection:bg-brand-purple/30 selection:text-white overflow-hidden flex flex-col">
         {/* Background Elements */}

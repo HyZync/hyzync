@@ -108,8 +108,13 @@ const Footer = () => {
                                 <Link to="/terms" className="hover:text-white transition-colors">Site Terms</Link>
                                 <Link to="/preferences" className="hover:text-white transition-colors">Communication Preferences</Link>
                                 <Link to="/cookies" className="hover:text-white transition-colors">Cookie Settings</Link>
-                                <Link to="/privacy" className="hover:text-white transition-colors whitespace-nowrap">Do Not Share My Personal Information</Link>
                                 <Link to="/legal" className="hover:text-white transition-colors">Legal</Link>
+                                <button
+                                    onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+                                    className="hover:text-white transition-colors cursor-pointer"
+                                >
+                                    Back to Top
+                                </button>
                             </div>
                         </div>
 
