@@ -138,32 +138,29 @@ const RetentionCalculator = () => {
                     </div>
                 </div>
 
-                {/* Result Card - Glassy & Glowing */}
+                {/* Result Card - Transparent, Text Only */}
                 <motion.div
-                    className="p-px rounded-2xl bg-gradient-to-r from-cyan-500/30 via-purple-500/30 to-pink-500/30"
+                    className="p-5 text-center relative overflow-hidden"
                     whileHover={{ scale: 1.02 }}
                 >
-                    <div className="bg-black/20 rounded-[0.95rem] p-5 text-center backdrop-blur-sm relative overflow-hidden">
+                    {/* Subtle neon pulse inside card - kept for some effect? User said "let the text sit on background directly" so maybe remove this too or make it very subtle? I will keep the pulse but remove the box. */}
+                    <motion.div
+                        className="absolute inset-0 opacity-20 bg-gradient-to-tr from-purple-500/10 to-transparent"
+                        animate={{ opacity: [0.1, 0.3, 0.1] }}
+                        transition={{ duration: 4, repeat: Infinity }}
+                    />
 
-                        {/* Subtle neon pulse inside card */}
-                        <motion.div
-                            className="absolute inset-0 opacity-20 bg-gradient-to-tr from-purple-500/10 to-transparent"
-                            animate={{ opacity: [0.1, 0.3, 0.1] }}
-                            transition={{ duration: 4, repeat: Infinity }}
-                        />
-
-                        <p className="text-white/70 text-[10px] font-bold uppercase tracking-[0.2em] mb-1 relative z-10">Projected Annual Gain</p>
-                        <motion.div
-                            className="text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-white via-purple-200 to-white tracking-tight relative z-10 drop-shadow-[0_0_10px_rgba(255,255,255,0.3)]"
-                            key={additionalRevenue}
-                            initial={{ scale: 0.9, opacity: 0.5 }}
-                            animate={{ scale: 1, opacity: 1 }}
-                        >
-                            {formatCurrency(additionalRevenue)}
-                        </motion.div>
-                        <div className="mt-2 text-xs text-purple-200/90 relative z-10">
-                            <span className="text-emerald-400 font-bold drop-shadow-[0_0_5px_rgba(52,211,153,0.5)]">+{formatCurrency(additionalRevenue / 12)}</span> / month recurring
-                        </div>
+                    <p className="text-white/70 text-[10px] font-bold uppercase tracking-[0.2em] mb-1 relative z-10">Projected Annual Gain</p>
+                    <motion.div
+                        className="text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-white via-purple-200 to-white tracking-tight relative z-10 drop-shadow-[0_0_10px_rgba(255,255,255,0.3)]"
+                        key={additionalRevenue}
+                        initial={{ scale: 0.9, opacity: 0.5 }}
+                        animate={{ scale: 1, opacity: 1 }}
+                    >
+                        {formatCurrency(additionalRevenue)}
+                    </motion.div>
+                    <div className="mt-2 text-xs text-purple-200/90 relative z-10">
+                        <span className="text-emerald-400 font-bold drop-shadow-[0_0_5px_rgba(52,211,153,0.5)]">+{formatCurrency(additionalRevenue / 12)}</span> / month recurring
                     </div>
                 </motion.div>
             </motion.div>
@@ -285,19 +282,44 @@ const Hero = () => {
                         </div>
                     </motion.div>
 
-                    {/* Data Sources Integration Section */}
+                    {/* Integrations & Industries Panel - Fixed Spacing & Visibility */}
                     <motion.div
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         transition={{ duration: 1, delay: 1 }}
-                        className="mt-6 pt-4 border-t border-white/5"
+                        className="mt-12 pt-8 border-t border-white/5 w-full"
                     >
-                        <p className="text-sm text-white/40 mb-4 uppercase tracking-widest font-medium">Seamlessly integrates with</p>
-                        <div className="flex flex-wrap gap-x-8 gap-y-4 items-center opacity-60 grayscale hover:grayscale-0 transition-all duration-500">
-                            {['Zendesk', 'HubSpot', 'Salesforce', 'Intercom', 'Jira'].map((source, i) => (
-                                <span key={i} className="text-lg font-bold text-white/80 font-display hover:text-white transition-colors cursor-default">{source}</span>
-                            ))}
-                            <span className="text-xs text-white/30 italic">+ many more</span>
+                        <div className="flex flex-col xl:flex-row items-start justify-between gap-40 w-full">
+                            {/* Left Side: Integrations (Compact) */}
+                            <div className="flex flex-col gap-6 items-start shrink-0">
+                                <p className="text-[10px] text-white/30 uppercase tracking-[0.3em] font-bold">Seamlessly Integrates With</p>
+                                <div className="flex items-center gap-x-8 opacity-50 grayscale hover:grayscale-0 transition-all duration-300">
+                                    {['Zendesk', 'HubSpot', 'Salesforce', 'Intercom', 'Jira'].map((source) => (
+                                        <span
+                                            key={source}
+                                            className="text-xl font-bold text-white font-display uppercase tracking-tight whitespace-nowrap hover:text-[#29B5E8] hover:drop-shadow-[0_0_10px_rgba(41,181,232,0.5)] transition-all duration-300 cursor-default"
+                                        >
+                                            {source}
+                                        </span>
+                                    ))}
+                                    <span className="text-sm text-white/60 italic whitespace-nowrap">+ many more</span>
+                                </div>
+                            </div>
+
+                            {/* Right Side: Industries (Matched Style & Alignment) */}
+                            <div className="flex flex-col gap-6 items-start flex-1 w-full">
+                                <p className="text-[10px] text-white/30 uppercase tracking-[0.3em] font-bold">Core Industries</p>
+                                <div className="flex items-center justify-between gap-x-12 w-full opacity-50 grayscale hover:grayscale-0 transition-all duration-300">
+                                    {['Subscription', 'Retail', 'Insurance', 'Hospitality'].map((industry, i) => (
+                                        <span
+                                            key={i}
+                                            className="text-xl font-bold text-white font-display uppercase tracking-tight whitespace-nowrap hover:text-[#29B5E8] hover:drop-shadow-[0_0_10px_rgba(41,181,232,0.5)] transition-all duration-300 cursor-default"
+                                        >
+                                            {industry}
+                                        </span>
+                                    ))}
+                                </div>
+                            </div>
                         </div>
                     </motion.div>
 
