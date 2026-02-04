@@ -4,7 +4,7 @@ import { Database, Zap, BarChart, Shield, Lock, Bell, ChevronRight, Brain, Activ
 
 const Features = () => {
     return (
-        <section id="features" className="py-24 px-6 max-w-screen-2xl mx-auto">
+        <section id="features" className="pt-0 pb-24 px-6 max-w-screen-2xl mx-auto">
             <div className="text-center max-w-3xl mx-auto mb-16">
                 <span className="inline-block py-2 px-4 rounded-full bg-brand-purple/10 border border-brand-purple/20 text-brand-purple font-light text-sm mb-6">
                     Our Expertise

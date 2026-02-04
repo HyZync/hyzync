@@ -43,7 +43,7 @@ const steps = [
 
 const HowItWorks = () => {
     return (
-        <section id="how-it-works" className="py-32 px-6 relative overflow-hidden scroll-mt-32">
+        <section id="how-it-works" className="pt-16 pb-32 px-6 relative overflow-hidden scroll-mt-32">
 
             {/* Background Gradients */}
             <div className="absolute top-0 left-0 w-full h-full pointer-events-none">
@@ -52,7 +52,7 @@ const HowItWorks = () => {
             </div>
 
             <div className="max-w-screen-2xl mx-auto relative z-10">
-                <div className="text-center mb-32">
+                <div className="text-center mb-20">
                     <span className="inline-block py-2 px-4 rounded-full bg-brand-purple/10 border border-brand-purple/20 text-brand-purple font-semibold text-sm mb-6">
                         Engagement Model
                     </span>

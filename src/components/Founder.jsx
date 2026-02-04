@@ -4,7 +4,7 @@ import { Sparkles, Brain, Cpu } from 'lucide-react';
 
 const Founder = () => {
     return (
-        <section className="relative min-h-screen flex items-center justify-center pt-32 pb-20 px-6 overflow-hidden">
+        <section className="relative min-h-screen flex items-center justify-center pt-16 pb-20 px-6 overflow-hidden">
             {/* Background elements to match the theme */}
             <div className="absolute top-0 left-0 w-full h-full pointer-events-none z-0 opacity-50">
                 <div className="absolute top-[20%] right-[10%] w-[500px] h-[500px] bg-brand-purple/15 blur-[120px] rounded-full"></div>

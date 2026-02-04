@@ -1,27 +1,29 @@
 import React from 'react';
 import { motion } from 'framer-motion';
 import { FileText, Database, Server, BarChart2, Cpu, Globe, Share2 } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
 import xcelLogo from '../assets/xcel.png';
 import salesforceLogo from '../assets/sforce.png';
 import appStoreLogo from '../assets/app.png';
 import typeformLogo from '../assets/typeform.png';
 
 const HorizonStandalone = () => {
+    const navigate = useNavigate();
     return (
-        <section id="horizon" className="py-32 px-6 max-w-screen-2xl mx-auto relative">
+        <section id="horizon" className="pt-32 pb-16 px-6 max-w-screen-2xl mx-auto relative scroll-mt-32">
 
             {/* Background Ambience */}
             <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-brand-cyan/5 blur-[120px] rounded-full pointer-events-none"></div>
 
-            <div className="text-center mb-20 relative z-10">
+            <div className="text-center mb-32 relative z-10">
                 <span className="inline-block py-2 px-4 rounded-full bg-brand-cyan/10 border border-brand-cyan/20 text-brand-cyan font-semibold text-sm mb-6">
                     Hyzync Data Analytics
                 </span>
                 <h2 className="text-4xl md:text-6xl font-bold mb-6">
                     Powered by <span className="text-brand-cyan">Horizon</span>
                 </h2>
-                <p className="text-xl text-secondary max-w-2xl mx-auto leading-relaxed">
-                    Our proprietary <strong>Gen AI-enabled, context-aware VOC analytics engine</strong>.
+                <p className="text-xl text-secondary max-w-3xl mx-auto leading-relaxed">
+                    Our proprietary <strong>Gen AI-enabled, context-aware VOC analytic engine</strong> built for deep feedback intelligence at scale.
                 </p>
             </div>
 
@@ -68,13 +70,13 @@ const HorizonStandalone = () => {
 
                         {/* Console Output */}
                         <div className="flex-1 font-mono text-xs space-y-3 overflow-hidden mask-gradient-b">
-                            <LogLine text="> Initializing context graph..." color="text-brand-cyan" delay={0.5} />
-                            <LogLine text="> Connecting to data sources..." color="text-white/60" delay={1.5} />
-                            <LogLine text="> Ingesting: NPS_Export_Q3.csv" color="text-white" delay={2.5} />
-                            <LogLine text="> Detected: 14,203 responses" color="text-brand-purple" delay={3.0} />
-                            <LogLine text="> Analyzing sentiment velocity..." color="text-brand-orange" delay={4.0} />
-                            <LogLine text="> Pattern match: 'Pricing' (92%)" color="text-brand-green" delay={5.0} />
-                            <LogLine text="> Generating decision trace..." color="text-white/60" delay={6.0} />
+                            <LogLine text="> Initializing Horizon VOC Engine..." color="text-brand-cyan" delay={0.5} />
+                            <LogLine text="> Mapping context graph: 25k+ signals..." color="text-white/60" delay={1.5} />
+                            <LogLine text="> Extracting core customer pain points..." color="text-white" delay={2.5} />
+                            <LogLine text="> Identifying expansion opportunities..." color="text-brand-purple" delay={3.0} />
+                            <LogLine text="> Mapping product growth clusters..." color="text-brand-orange" delay={4.0} />
+                            <LogLine text="> Compiling strategic client roadmap..." color="text-brand-green" delay={5.0} />
+                            <LogLine text="> System: Context Loaded & Optimized." color="text-white/60" delay={6.0} />
                             <motion.div
                                 className="h-0.5 bg-brand-cyan shadow-[0_0_10px_#06b6d4]"
                                 initial={{ width: 0 }}
@@ -99,23 +101,23 @@ const HorizonStandalone = () => {
 
                 {/* Right Column: Outputs (The "Value") */}
                 <div className="space-y-8 order-3">
-                    <div className="p-6 rounded-2xl bg-white-5 border border-white-10 hover:border-brand-cyan/30 transition-colors group">
+                    <div className="p-6 rounded-2xl bg-white-5 border border-white-10 hover:border-brand-cyan/30 transition-all group">
                         <div className="w-12 h-12 rounded-lg bg-brand-purple/10 flex items-center justify-center text-brand-purple mb-4 group-hover:scale-110 transition-transform">
                             <Share2 size={24} />
                         </div>
-                        <h3 className="text-xl font-bold text-white mb-2">Feedback Intelligence</h3>
+                        <h3 className="text-xl font-bold text-white mb-2">Pain & Growth Extraction</h3>
                         <p className="text-secondary text-sm leading-relaxed">
-                            Turn surveys, reviews, and open-ended text into <span className="text-white">actionable context</span> with GenAI.
+                            Automatically isolate critical <span className="text-white">customer pain points</span> and identify untapped expansion opportunities at scale.
                         </p>
                     </div>
 
-                    <div className="p-6 rounded-2xl bg-white-5 border border-white-10 hover:border-brand-cyan/30 transition-colors group">
+                    <div className="p-6 rounded-2xl bg-white-5 border border-white-10 hover:border-brand-cyan/30 transition-all group">
                         <div className="w-12 h-12 rounded-lg bg-brand-green/10 flex items-center justify-center text-brand-green mb-4 group-hover:scale-110 transition-transform">
                             <Globe size={24} />
                         </div>
-                        <h3 className="text-xl font-bold text-white mb-2">For Retention Leaders</h3>
+                        <h3 className="text-xl font-bold text-white mb-2">Strategic Transformation</h3>
                         <p className="text-secondary text-sm leading-relaxed">
-                            Decode complex customer signals into <span className="text-white">precise churn prevention</span> strategies.
+                            Convert feedback into <span className="text-white">precise product improvements</span> and data-driven strategies for your clients.
                         </p>
                     </div>
                 </div>
@@ -143,11 +145,14 @@ const HorizonStandalone = () => {
                     ))}
                 </div>
 
-                <div className="text-center mt-16">
-                    <a href="#contact" className="inline-flex items-center gap-2 bg-white-5 border border-white-10 hover:bg-brand-cyan hover:border-brand-cyan hover:text-black text-white px-8 py-4 rounded-full font-bold transition-all duration-300">
+                <div className="text-center mt-8">
+                    <button
+                        onClick={() => navigate('/#contact')}
+                        className="inline-flex items-center gap-2 bg-white-5 border border-white-10 hover:bg-brand-cyan hover:border-brand-cyan hover:text-black text-white px-8 py-4 rounded-full font-bold transition-all duration-300 cursor-pointer"
+                    >
                         Request Data Analysis
                         <Server size={18} />
-                    </a>
+                    </button>
                 </div>
             </div>
         </section>

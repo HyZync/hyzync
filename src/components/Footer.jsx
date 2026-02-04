@@ -1,11 +1,19 @@
 import React from 'react';
 import logo from '../assets/logo.png';
-import { Linkedin, Twitter } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Linkedin } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
+
+// Custom X (Twitter) Icon
+const XIcon = ({ size = 16, className = '' }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" className={className}>
+        <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+    </svg>
+);
 
 const Footer = () => {
+    const navigate = useNavigate();
     return (
-        <footer className="border-t border-white-10 mt-12 pt-12 pb-6 bg-background">
+        <footer className="border-t border-white-10 mt-8 pt-12 pb-6 bg-background">
             <div className="max-w-screen-2xl mx-auto px-6">
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-8 mb-10">
                     <div className="md:col-span-1">
@@ -49,9 +57,12 @@ const Footer = () => {
                         <h3 className="text-2xl md:text-3xl font-bold text-white mb-2">
                             Ready to become a Customer First brand?
                         </h3>
-                        <Link to="/#contact" className="text-base text-secondary hover:text-brand-purple transition-colors border-b border-brand-purple/30 hover:border-brand-purple pb-0.5">
+                        <button
+                            onClick={() => navigate('/#contact')}
+                            className="text-base text-secondary hover:text-brand-purple transition-colors border-b border-brand-purple/30 hover:border-brand-purple pb-0.5 cursor-pointer bg-transparent"
+                        >
                             Take the first steps in your transformation
-                        </Link>
+                        </button>
                     </div>
 
                     {/* Verification & Awards Badges */}
@@ -104,7 +115,7 @@ const Footer = () => {
 
                         {/* Right: Socials */}
                         <div className="flex items-center gap-2">
-                            <SocialBtn icon={Twitter} href="https://x.com/hyzync" />
+                            <SocialBtn icon={XIcon} href="https://x.com/hyzync" />
                             <SocialBtn icon={Linkedin} href="https://linkedin.com/company/hyzync" />
                         </div>
                     </div>

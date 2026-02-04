@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { ChevronRight, DollarSign, TrendingUp, Users, Sparkles } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
 
 const CountUp = ({ end, duration = 2 }) => {
     const [count, setCount] = useState(0);
@@ -142,7 +143,7 @@ const RetentionCalculator = () => {
                     className="p-px rounded-2xl bg-gradient-to-r from-cyan-500/30 via-purple-500/30 to-pink-500/30"
                     whileHover={{ scale: 1.02 }}
                 >
-                    <div className="bg-black/40 rounded-[0.95rem] p-5 text-center backdrop-blur-sm relative overflow-hidden">
+                    <div className="bg-black/20 rounded-[0.95rem] p-5 text-center backdrop-blur-sm relative overflow-hidden">
 
                         {/* Subtle neon pulse inside card */}
                         <motion.div
@@ -171,8 +172,13 @@ const RetentionCalculator = () => {
 };
 
 const Hero = () => {
+    const navigate = useNavigate();
+    const handleNavClick = (path) => {
+        navigate(path);
+    };
+
     return (
-        <section className="relative min-h-screen flex flex-col justify-center px-6 pt-32 pb-20 overflow-hidden">
+        <section className="relative min-h-screen flex flex-col justify-center px-6 pt-32 pb-8 overflow-hidden">
 
             {/* Ambient Background Glow */}
             <div className="absolute top-0 left-0 w-full h-full pointer-events-none z-0 opacity-50">
@@ -180,7 +186,7 @@ const Hero = () => {
                 <div className="absolute bottom-[20%] right-[15%] w-[350px] h-[350px] bg-brand-blue/15 blur-[90px] rounded-full"></div>
             </div>
 
-            <div className="max-w-screen-2xl mx-auto w-full grid grid-cols-1 lg:grid-cols-2 gap-12 lg:gap-24 items-center relative z-10">
+            <div className="max-w-screen-2xl mx-auto w-full grid grid-cols-1 lg:grid-cols-2 gap-12 lg:gap-24 items-start relative z-10">
 
                 {/* Left Column: Text Content */}
                 <div className="flex flex-col gap-8 max-w-2xl">
@@ -229,24 +235,19 @@ const Hero = () => {
                         transition={{ duration: 0.6, delay: 0.4 }}
                         className="flex flex-wrap items-center gap-4 mt-2"
                     >
-                        <a href="#contact" className="group relative inline-flex items-center gap-2 px-8 py-4 bg-brand-purple text-white rounded-full font-bold transition-all hover:scale-105 active:scale-95 shadow-[0_0_20px_rgba(124,58,237,0.3)] hover:shadow-[0_0_30px_rgba(124,58,237,0.5)] overflow-hidden">
+                        <button
+                            onClick={() => handleNavClick('/#contact')}
+                            className="group relative inline-flex items-center gap-2 px-8 py-4 bg-brand-purple text-white rounded-full font-bold transition-all hover:scale-105 active:scale-95 shadow-[0_0_20px_rgba(124,58,237,0.3)] hover:shadow-[0_0_30px_rgba(124,58,237,0.5)] overflow-hidden cursor-pointer"
+                        >
                             <span className="relative z-10">Consult with an Expert</span>
                             <ChevronRight className="relative z-10 group-hover:translate-x-1 transition-transform" size={20} />
 
                             {/* Shine Effect */}
                             <div className="absolute inset-0 -translate-x-full group-hover:animate-shine bg-gradient-to-r from-transparent via-white/30 to-transparent z-0" />
-                        </a>
+                        </button>
 
                         <button
-                            onClick={(e) => {
-                                e.preventDefault();
-                                const section = document.getElementById('how-it-works');
-                                if (section) {
-                                    const navHeight = 80;
-                                    const top = section.getBoundingClientRect().top + window.scrollY - navHeight;
-                                    window.scrollTo({ top, behavior: 'smooth' });
-                                }
-                            }}
+                            onClick={() => handleNavClick('/#how-it-works')}
                             className="px-8 py-4 rounded-full border border-white-10 text-white font-medium hover:bg-white-5 transition-colors cursor-pointer"
                         >
                             Our Process
@@ -289,7 +290,7 @@ const Hero = () => {
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         transition={{ duration: 1, delay: 1 }}
-                        className="mt-12 pt-8 border-t border-white/5"
+                        className="mt-6 pt-4 border-t border-white/5"
                     >
                         <p className="text-sm text-white/40 mb-4 uppercase tracking-widest font-medium">Seamlessly integrates with</p>
                         <div className="flex flex-wrap gap-x-8 gap-y-4 items-center opacity-60 grayscale hover:grayscale-0 transition-all duration-500">
@@ -299,10 +300,27 @@ const Hero = () => {
                             <span className="text-xs text-white/30 italic">+ many more</span>
                         </div>
                     </motion.div>
+
+                    {/* Academy Quiz Redirect */}
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        transition={{ duration: 1, delay: 1.2 }}
+                        className="mt-8 pt-6 border-t border-white/5"
+                    >
+                        <p className="text-sm text-white/40 mb-4 uppercase tracking-widest font-medium">Recommended Diagnostics</p>
+                        <button
+                            onClick={() => navigate('/academy#reality-check')}
+                            className="group flex items-center gap-3 text-white/70 hover:text-white transition-colors"
+                        >
+                            <span className="text-lg font-light tracking-wide border-b border-transparent group-hover:border-white/50 transition-all">Know where are you now on retention</span>
+                            <ChevronRight size={16} className="text-brand-purple group-hover:translate-x-1 transition-transform" />
+                        </button>
+                    </motion.div>
                 </div>
 
                 {/* Right Column: Retention Calculator */}
-                <div className="relative h-full w-full flex items-center justify-center py-12 lg:py-0">
+                <div className="relative w-full flex justify-center py-8 lg:py-0 lg:pt-[76px]">
                     <RetentionCalculator />
                 </div>
             </div>

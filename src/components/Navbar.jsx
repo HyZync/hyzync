@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { Menu, X } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import logo from '../assets/logo.png';
 
 const Navbar = () => {
     const [isOpen, setIsOpen] = useState(false);
     const [isVisible, setIsVisible] = useState(true);
     const [lastScrollY, setLastScrollY] = useState(0);
+    const location = useLocation();
+    const navigate = useNavigate();
 
     useEffect(() => {
         const handleScroll = () => {
@@ -25,6 +27,44 @@ const Navbar = () => {
         return () => window.removeEventListener('scroll', handleScroll);
     }, [lastScrollY]);
 
+    const handleNavClick = (path) => {
+        setIsOpen(false);
+
+        // If it's a hash link
+        if (path.includes('#')) {
+            const [basePath, hash] = path.split('#');
+
+            // If we are already on the target path, just update hash
+            if (location.pathname === basePath || (location.pathname === '/' && basePath === '')) {
+                // Force a temporary hash clear if it's the same hash to re-trigger useEffect in ScrollManager
+                if (location.hash === `#${hash}`) {
+                    navigate(`${basePath || '/'}`, { replace: true });
+                    setTimeout(() => navigate(path), 10);
+                } else {
+                    navigate(path);
+                }
+            } else {
+                navigate(path);
+            }
+        } else {
+            navigate(path);
+        }
+    };
+
+    const navItems = [
+        { name: 'horizon', path: '/#horizon' },
+        { name: 'academy', path: '/academy' },
+        { name: 'iq', path: '/iq', special: true },
+        { name: 'contact', path: '/#contact' }
+    ];
+
+    const mobileNavItems = [
+        { name: 'horizon', path: '/#horizon' },
+        { name: 'academy', path: '/academy' },
+        { name: 'IQ', path: '/iq' },
+        { name: 'contact', path: '/#contact' }
+    ];
+
     return (
         <nav className="relative w-full flex justify-center pt-4 md:pt-8 z-50">
             <div className="bg-black/40 backdrop-blur-md border border-white/10 rounded-full px-8 py-3 flex items-center gap-8 shadow-2xl">
@@ -34,16 +74,11 @@ const Navbar = () => {
 
                 {/* Desktop Menu */}
                 <div className="hidden md:flex items-center gap-8">
-                    {[
-                        { name: 'horizon', path: '/#horizon' },
-                        { name: 'academy', path: '/academy' },
-                        { name: 'iq', path: '/iq', special: true },
-                        { name: 'contact', path: '/#contact' }
-                    ].map((item) => (
-                        <Link
+                    {navItems.map((item) => (
+                        <button
                             key={item.name}
-                            to={item.path}
-                            className={`text-sm font-medium transition-all relative group/nav ${item.special
+                            onClick={() => handleNavClick(item.path)}
+                            className={`text-sm font-medium transition-all relative group/nav cursor-pointer ${item.special
                                 ? 'text-brand-purple font-bold flex items-center gap-1.5'
                                 : 'text-secondary hover:text-white'
                                 }`}
@@ -62,7 +97,7 @@ const Navbar = () => {
                             ) : (
                                 item.name
                             )}
-                        </Link>
+                        </button>
                     ))}
                 </div>
 
@@ -78,20 +113,14 @@ const Navbar = () => {
             {/* Mobile Menu */}
             {isOpen && (
                 <div className="absolute top-full left-1/2 -translate-x-1/2 w-[90vw] max-w-md mt-4 bg-black/90 backdrop-blur-xl border border-white/10 rounded-2xl p-6 flex flex-col space-y-4 shadow-xl">
-                    {[
-                        { name: 'Horizon', path: '/#horizon' },
-                        { name: 'Academy', path: '/academy' },
-                        { name: 'IQ', path: '/iq' },
-                        { name: 'Contact', path: '/#contact' }
-                    ].map((item) => (
-                        <Link
+                    {mobileNavItems.map((item) => (
+                        <button
                             key={item.name}
-                            to={item.path}
-                            className="text-white text-lg font-medium text-center hover:text-brand-purple transition-colors"
-                            onClick={() => setIsOpen(false)}
+                            onClick={() => handleNavClick(item.path)}
+                            className="text-white text-lg font-medium text-center hover:text-brand-purple transition-colors w-full"
                         >
                             {item.name}
-                        </Link>
+                        </button>
                     ))}
                 </div>
             )}

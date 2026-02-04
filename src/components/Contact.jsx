@@ -1,7 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Mail, Send, CheckCircle, Linkedin, Twitter, Globe, Clock, Ticket, AlertCircle } from 'lucide-react';
+import { Mail, Send, CheckCircle, Linkedin, Globe, Clock, Ticket, AlertCircle } from 'lucide-react';
 import { useLocation } from 'react-router-dom';
+
+// Custom X (Twitter) Icon
+const XIcon = ({ size = 20, className = '' }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" className={className}>
+        <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+    </svg>
+);
 
 const Contact = () => {
     const [formState, setFormState] = useState('idle'); // idle, sending, success, error
@@ -74,27 +81,30 @@ const Contact = () => {
     };
 
     return (
-        <section id="contact" className="py-32 px-6 max-w-screen-2xl mx-auto scroll-mt-32">
-            <div className="grid grid-cols-1 lg:grid-cols-[1fr_1.5fr] gap-16 items-start">
-                {/* Info */}
+        <section id="contact" className="py-24 px-6 max-w-screen-2xl mx-auto scroll-mt-32 relative">
+            {/* Ambient Background Glow */}
+            <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-brand-purple/5 blur-[120px] rounded-full pointer-events-none"></div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-[1fr_1.2fr] gap-16 lg:gap-24 items-start relative z-10">
+                {/* Info Column */}
                 <motion.div
                     initial={{ opacity: 0, x: -30 }}
                     whileInView={{ opacity: 1, x: 0 }}
                     transition={{ duration: 0.6 }}
                     viewport={{ once: true }}
                 >
-                    <span className="inline-block py-2 px-4 rounded-full bg-brand-purple/10 border border-brand-purple/20 text-brand-purple font-semibold text-sm mb-6">
+                    <span className="inline-block py-2 px-4 rounded-full bg-[#1A1A1C] border border-white/10 text-brand-purple font-medium text-[10px] uppercase tracking-widest mb-8">
                         Contact
                     </span>
-                    <h2 className="text-4xl md:text-5xl font-bold mb-6">
+                    <h2 className="text-5xl md:text-6xl font-bold mb-8 leading-tight tracking-tight text-white">
                         Let's Start a <br />
-                        <span className="text-gradient">Conversation</span>
+                        <span className="text-transparent bg-clip-text bg-gradient-to-r from-brand-blue via-brand-purple to-brand-magenta">Conversation</span>
                     </h2>
-                    <p className="text-xl text-secondary mb-12">
+                    <p className="text-lg text-zinc-400 mb-12 max-w-md font-light leading-relaxed">
                         Ready to see how Hyzync can transform your customer retention? Get in touch and we'll show you the magic.
                     </p>
 
-                    <div className="space-y-8 mb-12">
+                    <div className="space-y-10 mb-12">
                         <ContactItem icon={Mail} label="Direct Inquiry" value="info@hyzync.com" />
                         <ContactItem icon={Globe} label="Service Region" value="Global / Remote-First" />
                         <ContactItem icon={Clock} label="Response Commitment" value="Within 24 Hours" />
@@ -102,25 +112,25 @@ const Contact = () => {
 
                     <div className="flex gap-4">
                         <SocialBtn icon={Linkedin} href="https://www.linkedin.com/company/hyzync" />
-                        <SocialBtn icon={Twitter} href="https://x.com/hyzync" />
+                        <SocialBtn icon={XIcon} href="https://x.com/hyzync" />
                     </div>
                 </motion.div>
 
-                {/* Form */}
+                {/* Form Card - Dark Glass Aesthetic */}
                 <motion.div
                     initial={{ opacity: 0, x: 30 }}
                     whileInView={{ opacity: 1, x: 0 }}
                     transition={{ duration: 0.6 }}
                     viewport={{ once: true }}
-                    className="glass-card p-10"
+                    className="bg-zinc-950/20 backdrop-blur-2xl border border-white/10 rounded-3xl p-8 md:p-10 shadow-2xl relative overflow-hidden"
                 >
-                    <h3 className="text-2xl font-bold mb-8">Send Us a Message</h3>
-                    <form onSubmit={handleSubmit} className="space-y-6">
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <h3 className="text-2xl font-bold text-white mb-8">Send Us a Message</h3>
+                    <form onSubmit={handleSubmit} className="space-y-5">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                             <InputGroup id="firstName" label="First Name" />
                             <InputGroup id="lastName" label="Last Name" />
                         </div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                             <InputGroup id="email" label="Email" type="email" />
                             <InputGroup id="phone" label="Phone" type="tel" />
                         </div>
@@ -133,30 +143,33 @@ const Contact = () => {
                                     exit={{ opacity: 0, height: 0 }}
                                     className="overflow-hidden"
                                 >
-                                    <div className="bg-brand-purple/20 border border-brand-purple/50 rounded-lg px-4 py-3 flex items-center gap-3">
-                                        <Ticket className="text-brand-magenta" size={20} />
+                                    <div className="bg-brand-purple/10 border border-brand-purple/30 rounded-lg px-4 py-3 flex items-center gap-3">
+                                        <Ticket className="text-brand-purple" size={18} />
                                         <div className="flex-grow">
-                                            <span className="text-xs text-secondary block">Applied Offer Code</span>
-                                            <span className="text-brand-magenta font-mono font-bold tracking-wider">{promoCode}</span>
+                                            <span className="text-[10px] text-zinc-400 block uppercase tracking-wider">Applied Offer Code</span>
+                                            <span className="text-white font-mono font-medium">{promoCode}</span>
                                         </div>
-                                        <span className="text-xs bg-brand-magenta/20 text-brand-magenta px-2 py-1 rounded font-bold">40% OFF</span>
+                                        <span className="text-[10px] bg-brand-purple/20 text-brand-purple px-2 py-1 rounded font-bold border border-brand-purple/20">40% OFF</span>
                                     </div>
                                     <input type="hidden" name="promo_code" value={promoCode} />
                                 </motion.div>
                             )}
                         </AnimatePresence>
+
                         <div className="relative">
                             <textarea
                                 id="message"
                                 name="message"
                                 required
-                                rows="4"
-                                className="w-full bg-white-5 border border-white-10 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-brand-purple focus:bg-white-10 peer transition-all resize-none"
-                                placeholder=" "
+                                rows="5"
+                                className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-brand-purple/50 focus:bg-white/10 peer transition-all resize-none placeholder-transparent"
+                                placeholder="Message"
                             ></textarea>
                             <label
                                 htmlFor="message"
-                                className="absolute left-4 top-3 text-secondary transition-all duration-300 pointer-events-none peer-focus:-top-2.5 peer-focus:left-3 peer-focus:text-sm peer-focus:text-brand-purple peer-focus:bg-background peer-focus:px-1 peer-[:not(:placeholder-shown)]:-top-2.5 peer-[:not(:placeholder-shown)]:left-3 peer-[:not(:placeholder-shown)]:text-sm peer-[:not(:placeholder-shown)]:text-brand-purple peer-[:not(:placeholder-shown)]:bg-background peer-[:not(:placeholder-shown)]:px-1"
+                                className="absolute left-4 top-3 text-zinc-500 text-sm transition-all duration-300 pointer-events-none 
+                                peer-focus:-top-2.5 peer-focus:left-3 peer-focus:text-xs peer-focus:text-brand-purple peer-focus:bg-transparent peer-focus:px-1 
+                                peer-[:not(:placeholder-shown)]:-top-2.5 peer-[:not(:placeholder-shown)]:left-3 peer-[:not(:placeholder-shown)]:text-xs peer-[:not(:placeholder-shown)]:text-brand-purple peer-[:not(:placeholder-shown)]:bg-transparent peer-[:not(:placeholder-shown)]:px-1"
                             >
                                 Message
                             </label>
@@ -165,36 +178,35 @@ const Contact = () => {
                         <button
                             type="submit"
                             disabled={formState === 'sending' || formState === 'success'}
-                            className={`w-full py-4 rounded-lg font-bold flex items-center justify-center gap-2 transition-all ${
-                                formState === 'success'
-                                    ? 'bg-brand-green text-white'
-                                    : formState === 'error'
+                            className={`w-full py-4 rounded-lg font-bold text-sm tracking-widest uppercase flex items-center justify-center gap-2 transition-all duration-300 ${formState === 'success'
+                                ? 'bg-brand-green text-white shadow-[0_0_20px_rgba(34,197,94,0.3)]'
+                                : formState === 'error'
                                     ? 'bg-red-600 text-white'
-                                    : 'bg-primary-gradient text-white hover:shadow-lg hover:shadow-brand-purple/30 hover:-translate-y-1'
-                            }`}
+                                    : 'bg-gradient-to-r from-brand-purple to-brand-magenta text-white hover:shadow-[0_0_30px_rgba(168,85,247,0.4)] hover:brightness-110'
+                                }`}
                         >
                             {formState === 'idle' && (
                                 <>
                                     Send Message
-                                    <Send size={18} />
+                                    <Send size={16} />
                                 </>
                             )}
-                            {formState === 'sending' && <span>Sending...</span>}
+                            {formState === 'sending' && <span className="animate-pulse">Sending...</span>}
                             {formState === 'success' && (
                                 <>
-                                    Message Sent!
-                                    <CheckCircle size={18} />
+                                    Message Sent
+                                    <CheckCircle size={16} />
                                 </>
                             )}
                             {formState === 'error' && (
                                 <>
-                                    Error - Please Try Again
-                                    <AlertCircle size={18} />
+                                    Error - Retry
+                                    <AlertCircle size={16} />
                                 </>
                             )}
                         </button>
-                        <p className="text-xs text-secondary/60 text-center mt-4 px-4 leading-relaxed">
-                            By submitting, I agree to the processing of my personal data by Hyzync in accordance with our <a href="/privacy" className="underline hover:text-white transition-colors">Privacy Policy</a>.
+                        <p className="text-[10px] text-zinc-600 text-center mt-4 px-4 leading-relaxed">
+                            By submitting, I agree to the processing of my personal data by Hyzync in accordance with our <a href="/privacy" className="underline hover:text-zinc-400 transition-colors">Privacy Policy</a>.
                         </p>
                     </form>
                 </motion.div>
@@ -204,13 +216,13 @@ const Contact = () => {
 };
 
 const ContactItem = ({ icon: Icon, label, value }) => (
-    <div className="flex gap-4 items-center">
-        <div className="w-12 h-12 rounded-xl bg-white-5 flex items-center justify-center text-brand-purple">
-            <Icon size={24} />
+    <div className="flex gap-5 items-center group">
+        <div className="w-12 h-12 rounded-2xl bg-[#1A1A1C] border border-white/5 flex items-center justify-center text-brand-purple group-hover:border-brand-purple/30 group-hover:bg-[#202022] transition-colors shadow-lg">
+            <Icon size={20} />
         </div>
         <div>
-            <span className="block text-sm text-secondary mb-0.5">{label}</span>
-            <span className="text-lg font-medium text-white">{value}</span>
+            <span className="block text-[10px] text-zinc-500 mb-1 uppercase tracking-widest font-bold opacity-60 group-hover:opacity-100 transition-opacity">{label}</span>
+            <span className="text-base font-medium text-white group-hover:text-brand-purple transition-colors">{value}</span>
         </div>
     </div>
 );
@@ -220,7 +232,7 @@ const SocialBtn = ({ icon: Icon, href }) => (
         href={href}
         target="_blank"
         rel="noopener noreferrer"
-        className="w-10 h-10 rounded-full bg-white-5 flex items-center justify-center text-secondary hover:bg-brand-purple hover:text-white transition-all hover:-translate-y-1"
+        className="w-12 h-12 rounded-xl bg-[#1A1A1C] border border-white/5 flex items-center justify-center text-zinc-400 hover:bg-brand-purple hover:text-white hover:border-brand-purple transition-all hover:-translate-y-1 shadow-lg"
     >
         <Icon size={20} />
     </a>
@@ -233,12 +245,14 @@ const InputGroup = ({ id, label, type = "text" }) => (
             id={id}
             name={id}
             required
-            className="w-full bg-white-5 border border-white-10 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-brand-purple focus:bg-white-10 peer transition-all"
-            placeholder=" "
+            className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-brand-purple/50 focus:bg-white/10 peer transition-all placeholder-transparent"
+            placeholder={label}
         />
         <label
             htmlFor={id}
-            className="absolute left-4 top-3 text-secondary transition-all duration-300 pointer-events-none peer-focus:-top-2.5 peer-focus:left-3 peer-focus:text-sm peer-focus:text-brand-purple peer-focus:bg-background peer-focus:px-1 peer-[:not(:placeholder-shown)]:-top-2.5 peer-[:not(:placeholder-shown)]:left-3 peer-[:not(:placeholder-shown)]:text-sm peer-[:not(:placeholder-shown)]:text-brand-purple peer-[:not(:placeholder-shown)]:bg-background peer-[:not(:placeholder-shown)]:px-1"
+            className="absolute left-4 top-3 text-zinc-500 text-sm transition-all duration-300 pointer-events-none 
+            peer-focus:-top-2.5 peer-focus:left-3 peer-focus:text-xs peer-focus:text-brand-purple peer-focus:bg-transparent peer-focus:px-1 
+            peer-[:not(:placeholder-shown)]:-top-2.5 peer-[:not(:placeholder-shown)]:left-3 peer-[:not(:placeholder-shown)]:text-xs peer-[:not(:placeholder-shown)]:text-brand-purple peer-[:not(:placeholder-shown)]:bg-transparent peer-[:not(:placeholder-shown)]:px-1"
         >
             {label}
         </label>

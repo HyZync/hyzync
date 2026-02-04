@@ -9,30 +9,8 @@ const PromoBanner = () => {
 
     const handleClaimOffer = (e) => {
         e.preventDefault();
-
-        // 1. Update URL with code
-        navigate('/?code=YOU40#contact', { replace: true });
-
-        // 2. Define robust scroll logic
-        const scrollToContact = () => {
-            const contactSection = document.getElementById('contact');
-            if (contactSection) {
-                const navHeight = 80; // Approximate navbar height
-                const targetPosition = contactSection.getBoundingClientRect().top + window.scrollY - navHeight;
-                window.scrollTo({
-                    top: targetPosition,
-                    behavior: 'smooth'
-                });
-            }
-        };
-
-        // Try immediately
-        scrollToContact();
-
-        // Retry logic for dynamic layouts
-        setTimeout(scrollToContact, 100);
-        setTimeout(scrollToContact, 300);
-        setTimeout(scrollToContact, 600);
+        // Just navigate with hash, the AdvancedScrollManager will take care of the rest
+        navigate('/?code=YOU40#contact');
     };
 
     if (!isVisible) return null;
