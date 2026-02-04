@@ -297,7 +297,7 @@ const Hero = () => {
                                     {['Zendesk', 'HubSpot', 'Salesforce', 'Intercom', 'Jira'].map((source) => (
                                         <span
                                             key={source}
-                                            className="text-xl font-bold text-white font-display uppercase tracking-tight whitespace-nowrap hover:text-[#29B5E8] hover:drop-shadow-[0_0_10px_rgba(41,181,232,0.5)] transition-all duration-300 cursor-default"
+                                            className="text-lg font-bold text-white font-display uppercase tracking-tight whitespace-nowrap hover:text-[#29B5E8] hover:drop-shadow-[0_0_10px_rgba(41,181,232,0.5)] transition-all duration-300 cursor-default"
                                         >
                                             {source}
                                         </span>
@@ -313,7 +313,7 @@ const Hero = () => {
                                     {['Subscription', 'Retail', 'Insurance', 'Hospitality'].map((industry, i) => (
                                         <span
                                             key={i}
-                                            className="text-xl font-bold text-white font-display uppercase tracking-tight whitespace-nowrap hover:text-[#29B5E8] hover:drop-shadow-[0_0_10px_rgba(41,181,232,0.5)] transition-all duration-300 cursor-default"
+                                            className="text-lg font-bold text-white font-display uppercase tracking-tight whitespace-nowrap hover:text-[#29B5E8] hover:drop-shadow-[0_0_10px_rgba(41,181,232,0.5)] transition-all duration-300 cursor-default"
                                         >
                                             {industry}
                                         </span>
