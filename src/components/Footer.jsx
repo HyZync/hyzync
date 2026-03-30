@@ -1,7 +1,8 @@
 import React from 'react';
 import logo from '../assets/logo.png';
 import { Linkedin } from 'lucide-react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { useHorizonPreviewNotice } from './HorizonPreviewNoticeProvider';
 
 // Custom X (Twitter) Icon
 const XIcon = ({ size = 16, className = '' }) => (
@@ -12,6 +13,79 @@ const XIcon = ({ size = 16, className = '' }) => (
 
 const Footer = () => {
     const navigate = useNavigate();
+    const location = useLocation();
+    const { openHorizonPreviewNotice } = useHorizonPreviewNotice();
+    const isHomeRoute = location.pathname === '/';
+
+    const handleHorizonPreviewClick = (event) => {
+        if (event) {
+            event.preventDefault();
+        }
+
+        openHorizonPreviewNotice();
+    };
+
+    if (isHomeRoute) {
+        return (
+            <footer className="mt-16 border-t border-slate-200 bg-[#eef4f9] pt-12 pb-8">
+                <div className="max-w-screen-2xl mx-auto px-6">
+                    <div className="grid grid-cols-1 gap-10 lg:grid-cols-[1.2fr_0.8fr]">
+                        <div>
+                            <img src={logo} alt="Hyzync Logo" className="h-8 w-auto mb-4" />
+                            <p className="max-w-xl text-sm leading-relaxed text-slate-600">
+                                Horizon helps teams turn reviews, tickets, CRM notes, and survey feedback into clear priorities and faster action.
+                            </p>
+                            <div className="mt-5 flex flex-wrap gap-3">
+                                <button
+                                    onClick={handleHorizonPreviewClick}
+                                    className="rounded-full bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-slate-800"
+                                >
+                                    Open Horizon
+                                </button>
+                                <button
+                                    onClick={() => navigate('/#contact')}
+                                    className="rounded-full border border-slate-300 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50"
+                                >
+                                    Talk to Hyzync
+                                </button>
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-8">
+                            <div>
+                                <h4 className="text-sm font-semibold text-slate-900">Platform</h4>
+                                <ul className="mt-3 space-y-2 text-sm">
+                                    <li><Link to="/horizon" onClick={handleHorizonPreviewClick} className="text-slate-600 hover:text-slate-900 transition-colors">Horizon App</Link></li>
+                                    <li><Link to="/#how-it-works" className="text-slate-600 hover:text-slate-900 transition-colors">How It Works</Link></li>
+                                    <li><Link to="/academy" className="text-slate-600 hover:text-slate-900 transition-colors">Academy</Link></li>
+                                    <li><Link to="/#contact" className="text-slate-600 hover:text-slate-900 transition-colors">Contact</Link></li>
+                                </ul>
+                            </div>
+
+                            <div>
+                                <h4 className="text-sm font-semibold text-slate-900">Company</h4>
+                                <ul className="mt-3 space-y-2 text-sm">
+                                    <li><Link to="/about" className="text-slate-600 hover:text-slate-900 transition-colors">About</Link></li>
+                                    <li><Link to="/careers" className="text-slate-600 hover:text-slate-900 transition-colors">Careers</Link></li>
+                                    <li><Link to="/privacy" className="text-slate-600 hover:text-slate-900 transition-colors">Privacy</Link></li>
+                                    <li><Link to="/terms" className="text-slate-600 hover:text-slate-900 transition-colors">Terms</Link></li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="mt-10 flex flex-col gap-4 border-t border-slate-200 pt-6 sm:flex-row sm:items-center sm:justify-between">
+                        <p className="text-sm text-slate-500">&copy; 2026 Hyzync Inc. All rights reserved.</p>
+                        <div className="flex items-center gap-2">
+                            <SocialBtn icon={XIcon} href="https://x.com/hyzync" light />
+                            <SocialBtn icon={Linkedin} href="https://linkedin.com/company/hyzync" light />
+                        </div>
+                    </div>
+                </div>
+            </footer>
+        );
+    }
+
     return (
         <footer className="border-t border-white-10 mt-8 pt-12 pb-6 bg-background">
             <div className="max-w-screen-2xl mx-auto px-6">
@@ -19,14 +93,15 @@ const Footer = () => {
                     <div className="md:col-span-1">
                         <img src={logo} alt="Hyzync Logo" className="h-8 w-auto mb-4" />
                         <p className="text-secondary leading-relaxed text-sm">
-                            AI-powered customer intelligence that stops churn before it happens.
+                            Horizon helps companies turn fragmented customer feedback into product, retention, and support action.
                         </p>
                     </div>
 
                     <div>
-                        <h4 className="text-sm font-semibold mb-3 text-white">Services</h4>
+                        <h4 className="text-sm font-semibold mb-3 text-white">Platform</h4>
                         <ul className="space-y-2 text-sm">
-                            <li><Link to="/#how-it-works" className="text-secondary hover:text-brand-purple transition-colors">How It Works</Link></li>
+                            <li><Link to="/#how-it-works" className="text-secondary hover:text-brand-purple transition-colors">Workflow</Link></li>
+                            <li><Link to="/horizon" onClick={handleHorizonPreviewClick} className="text-secondary hover:text-brand-purple transition-colors">Horizon App</Link></li>
                             <li><Link to="/academy" className="text-secondary hover:text-brand-purple transition-colors">Academy</Link></li>
                             <li><Link to="/#contact" className="text-secondary hover:text-brand-purple transition-colors">Contact</Link></li>
                         </ul>
@@ -55,13 +130,13 @@ const Footer = () => {
                     {/* Footer CTA */}
                     <div className="flex flex-col items-center text-center mb-4">
                         <h3 className="text-2xl md:text-3xl font-bold text-white mb-2">
-                            Ready to become a Customer First brand?
+                            Ready to run your company on customer truth?
                         </h3>
                         <button
                             onClick={() => navigate('/#contact')}
                             className="text-base text-secondary hover:text-brand-purple transition-colors border-b border-brand-purple/30 hover:border-brand-purple pb-0.5 cursor-pointer bg-transparent"
                         >
-                            Take the first steps in your transformation
+                            Start your Horizon rollout
                         </button>
                     </div>
 
@@ -130,14 +205,18 @@ const Footer = () => {
     );
 };
 
-const SocialBtn = ({ icon: Icon, href }) => (
+const SocialBtn = ({ icon: Icon, href, light = false }) => (
     <a
         href={href}
         target="_blank"
         rel="noopener noreferrer"
-        className="w-8 h-8 rounded-md bg-white-5 hover:bg-white-10 flex items-center justify-center text-white transition-all duration-200 hover:-translate-y-0.5"
+        className={`w-8 h-8 rounded-md flex items-center justify-center transition-all duration-200 hover:-translate-y-0.5 ${
+            light
+                ? 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
+                : 'bg-white-5 hover:bg-white-10 text-white'
+        }`}
     >
-        <Icon size={16} fill="white" className="opacity-80" />
+        <Icon size={16} fill={light ? 'currentColor' : 'white'} className={light ? '' : 'opacity-80'} />
     </a>
 );
 

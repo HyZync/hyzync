@@ -37,9 +37,15 @@ const Contact = () => {
         };
 
         try {
-            // FormSpree integration
-            const formSpreeEndpoint = import.meta.env.VITE_FORMFREE_ENDPOINT || 'https://formspree.io/f/mykpbkdb';
-            const formSpreeApiKey = import.meta.env.VITE_FORMFREE_API_KEY || '';
+            // Support both the corrected Formspree env names and the legacy typo.
+            const formSpreeEndpoint =
+                import.meta.env.VITE_FORMSPREE_ENDPOINT ||
+                import.meta.env.VITE_FORMFREE_ENDPOINT ||
+                'https://formspree.io/f/mykpbkdb';
+            const formSpreeApiKey =
+                import.meta.env.VITE_FORMSPREE_API_KEY ||
+                import.meta.env.VITE_FORMFREE_API_KEY ||
+                '';
 
             // FormSpree accepts both JSON and form-urlencoded
             // Using form-urlencoded for better compatibility
@@ -81,11 +87,15 @@ const Contact = () => {
     };
 
     return (
-        <section id="contact" className="py-24 px-6 max-w-screen-2xl mx-auto scroll-mt-32 relative">
-            {/* Ambient Background Glow */}
-            <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-brand-purple/5 blur-[120px] rounded-full pointer-events-none"></div>
+        <section id="contact" className="relative mx-auto mt-16 max-w-[1520px] px-6 py-6 scroll-mt-32">
+            <div className="pointer-events-none absolute left-8 top-12 h-56 w-56 rounded-full bg-cyan-200/35 blur-[120px]" />
+            <div className="pointer-events-none absolute right-6 top-10 h-72 w-72 rounded-full bg-blue-200/25 blur-[140px]" />
+            <div className="pointer-events-none absolute bottom-8 left-[36%] h-52 w-52 rounded-full bg-emerald-200/20 blur-[120px]" />
 
-            <div className="grid grid-cols-1 lg:grid-cols-[1fr_1.2fr] gap-16 lg:gap-24 items-start relative z-10">
+            <div className="relative overflow-hidden rounded-[38px] border border-slate-200 bg-white p-7 shadow-[0_28px_80px_-48px_rgba(15,23,42,0.24)] md:p-8">
+                <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_10%_12%,rgba(34,211,238,0.18),transparent_26%),radial-gradient(circle_at_92%_8%,rgba(59,130,246,0.14),transparent_24%),linear-gradient(180deg,rgba(255,255,255,0.92),rgba(248,251,255,0.82))]" />
+
+                <div className="relative grid grid-cols-1 items-start gap-10 lg:grid-cols-[0.92fr_1.08fr] lg:gap-12">
                 {/* Info Column */}
                 <motion.div
                     initial={{ opacity: 0, x: -30 }}
@@ -93,46 +103,56 @@ const Contact = () => {
                     transition={{ duration: 0.6 }}
                     viewport={{ once: true }}
                 >
-                    <span className="inline-block py-2 px-4 rounded-full bg-[#1A1A1C] border border-white/10 text-brand-purple font-medium text-[10px] uppercase tracking-widest mb-8">
-                        Contact
+                    <span className="inline-flex items-center gap-2 rounded-full border border-cyan-200 bg-cyan-50 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-cyan-700">
+                        Contact Hyzync
                     </span>
-                    <h2 className="text-5xl md:text-6xl font-bold mb-8 leading-tight tracking-tight text-white">
-                        Let's Start a <br />
-                        <span className="text-transparent bg-clip-text bg-gradient-to-r from-brand-blue via-brand-purple to-brand-magenta">Conversation</span>
+                    <h2 className="mt-6 text-4xl font-semibold leading-tight tracking-tight text-slate-950 md:text-6xl">
+                        Bring your customer signals into one clear action plan.
                     </h2>
-                    <p className="text-lg text-zinc-400 mb-12 max-w-md font-light leading-relaxed">
-                        Ready to see how Hyzync can transform your customer retention? Get in touch and we'll show you the magic.
+                    <p className="mt-6 max-w-xl text-lg leading-relaxed text-slate-600">
+                        Share your team, your data sources, and the friction you want to solve first. We will show how Horizon fits your workflow across product, support, growth, and leadership.
                     </p>
 
-                    <div className="space-y-10 mb-12">
-                        <ContactItem icon={Mail} label="Direct Inquiry" value="info@hyzync.com" />
-                        <ContactItem icon={Globe} label="Service Region" value="Global / Remote-First" />
-                        <ContactItem icon={Clock} label="Response Commitment" value="Within 24 Hours" />
+                    <div className="mt-8 grid gap-4 sm:grid-cols-3 lg:grid-cols-1">
+                        <ContactItem icon={Mail} label="Email" value="info@hyzync.com" />
+                        <ContactItem icon={Globe} label="Best For" value="Reviews, CRM, surveys, and uploads" />
+                        <ContactItem icon={Clock} label="Response Time" value="Within 24 hours" />
                     </div>
 
-                    <div className="flex gap-4">
+                    <div className="mt-8 flex gap-3">
                         <SocialBtn icon={Linkedin} href="https://www.linkedin.com/company/hyzync" />
                         <SocialBtn icon={XIcon} href="https://x.com/hyzync" />
                     </div>
                 </motion.div>
 
-                {/* Form Card - Dark Glass Aesthetic */}
+                {/* Form Card */}
                 <motion.div
                     initial={{ opacity: 0, x: 30 }}
                     whileInView={{ opacity: 1, x: 0 }}
                     transition={{ duration: 0.6 }}
                     viewport={{ once: true }}
-                    className="bg-zinc-950/20 backdrop-blur-2xl border border-white/10 rounded-3xl p-8 md:p-10 shadow-2xl relative overflow-hidden"
+                    className="rounded-[32px] border border-slate-200 bg-slate-50/90 p-6 shadow-[0_24px_70px_-46px_rgba(15,23,42,0.24)] md:p-8"
                 >
-                    <h3 className="text-2xl font-bold text-white mb-8">Send Us a Message</h3>
-                    <form onSubmit={handleSubmit} className="space-y-5">
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                            <InputGroup id="firstName" label="First Name" />
-                            <InputGroup id="lastName" label="Last Name" />
+                    <div className="flex flex-wrap items-start justify-between gap-4">
+                        <div>
+                            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Book a walkthrough</p>
+                            <h3 className="mt-3 text-3xl font-semibold leading-tight text-slate-950">
+                                Tell us what Horizon should analyze first.
+                            </h3>
+                            <p className="mt-3 max-w-lg text-sm leading-relaxed text-slate-600">
+                                We will use your note to tailor the demo around your feedback sources, workflows, and biggest customer risk signals.
+                            </p>
                         </div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                            <InputGroup id="email" label="Email" type="email" />
-                            <InputGroup id="phone" label="Phone" type="tel" />
+                    </div>
+
+                    <form onSubmit={handleSubmit} className="mt-8 space-y-5">
+                        <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+                            <InputGroup id="firstName" label="First Name" placeholder="Alex" />
+                            <InputGroup id="lastName" label="Last Name" placeholder="Morgan" />
+                        </div>
+                        <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+                            <InputGroup id="email" label="Work Email" type="email" placeholder="alex@company.com" />
+                            <InputGroup id="phone" label="Phone" type="tel" placeholder="+1 555 010 2400" />
                         </div>
 
                         <AnimatePresence>
@@ -143,86 +163,110 @@ const Contact = () => {
                                     exit={{ opacity: 0, height: 0 }}
                                     className="overflow-hidden"
                                 >
-                                    <div className="bg-brand-purple/10 border border-brand-purple/30 rounded-lg px-4 py-3 flex items-center gap-3">
-                                        <Ticket className="text-brand-purple" size={18} />
+                                    <div className="flex items-center gap-3 rounded-2xl border border-cyan-200 bg-cyan-50 px-4 py-3">
+                                        <Ticket className="text-cyan-700" size={18} />
                                         <div className="flex-grow">
-                                            <span className="text-[10px] text-zinc-400 block uppercase tracking-wider">Applied Offer Code</span>
-                                            <span className="text-white font-mono font-medium">{promoCode}</span>
+                                            <span className="block text-[10px] uppercase tracking-[0.18em] text-slate-400">Access Code</span>
+                                            <span className="font-mono text-sm font-semibold text-slate-900">{promoCode}</span>
                                         </div>
-                                        <span className="text-[10px] bg-brand-purple/20 text-brand-purple px-2 py-1 rounded font-bold border border-brand-purple/20">40% OFF</span>
+                                        <span className="rounded-full border border-cyan-200 bg-white px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-cyan-700">
+                                            Priority
+                                        </span>
                                     </div>
                                     <input type="hidden" name="promo_code" value={promoCode} />
                                 </motion.div>
                             )}
                         </AnimatePresence>
 
-                        <div className="relative">
+                        <div className="space-y-2">
+                            <label htmlFor="message" className="text-sm font-medium text-slate-700">
+                                What should Horizon analyze first?
+                            </label>
                             <textarea
                                 id="message"
                                 name="message"
                                 required
-                                rows="5"
-                                className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-brand-purple/50 focus:bg-white/10 peer transition-all resize-none placeholder-transparent"
-                                placeholder="Message"
-                            ></textarea>
-                            <label
-                                htmlFor="message"
-                                className="absolute left-4 top-3 text-zinc-500 text-sm transition-all duration-300 pointer-events-none 
-                                peer-focus:-top-2.5 peer-focus:left-3 peer-focus:text-xs peer-focus:text-brand-purple peer-focus:bg-transparent peer-focus:px-1 
-                                peer-[:not(:placeholder-shown)]:-top-2.5 peer-[:not(:placeholder-shown)]:left-3 peer-[:not(:placeholder-shown)]:text-xs peer-[:not(:placeholder-shown)]:text-brand-purple peer-[:not(:placeholder-shown)]:bg-transparent peer-[:not(:placeholder-shown)]:px-1"
-                            >
-                                Message
-                            </label>
+                                rows="6"
+                                className="w-full rounded-[24px] border border-slate-200 bg-white px-4 py-3 text-slate-900 shadow-[0_14px_40px_-34px_rgba(15,23,42,0.28)] outline-none transition-all placeholder:text-slate-400 focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100 resize-none"
+                                placeholder="Example: Merge app reviews, SurveyMonkey responses, Trustpilot feedback, and CRM notes so we can spot onboarding friction and churn risk."
+                            />
                         </div>
+
+                        <AnimatePresence mode="wait">
+                            {formState === 'error' && (
+                                <motion.div
+                                    initial={{ opacity: 0, y: -6 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    exit={{ opacity: 0, y: -6 }}
+                                    className="flex items-start gap-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700"
+                                >
+                                    <AlertCircle size={18} className="mt-0.5 shrink-0" />
+                                    <span>There was a problem sending your request. Please try again.</span>
+                                </motion.div>
+                            )}
+
+                            {formState === 'success' && (
+                                <motion.div
+                                    initial={{ opacity: 0, y: -6 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    exit={{ opacity: 0, y: -6 }}
+                                    className="flex items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700"
+                                >
+                                    <CheckCircle size={18} className="mt-0.5 shrink-0" />
+                                    <span>Your request has been sent. We will get back to you shortly.</span>
+                                </motion.div>
+                            )}
+                        </AnimatePresence>
 
                         <button
                             type="submit"
                             disabled={formState === 'sending' || formState === 'success'}
-                            className={`w-full py-4 rounded-lg font-bold text-sm tracking-widest uppercase flex items-center justify-center gap-2 transition-all duration-300 ${formState === 'success'
-                                ? 'bg-brand-green text-white shadow-[0_0_20px_rgba(34,197,94,0.3)]'
+                            className={`inline-flex w-full items-center justify-center gap-2 rounded-full px-6 py-4 text-sm font-semibold transition-all duration-300 ${formState === 'success'
+                                ? 'bg-emerald-500 text-white shadow-[0_24px_55px_-30px_rgba(16,185,129,0.55)]'
                                 : formState === 'error'
-                                    ? 'bg-red-600 text-white'
-                                    : 'bg-gradient-to-r from-brand-purple to-brand-magenta text-white hover:shadow-[0_0_30px_rgba(168,85,247,0.4)] hover:brightness-110'
+                                    ? 'bg-rose-500 text-white'
+                                    : 'bg-slate-950 text-white shadow-[0_24px_55px_-30px_rgba(15,23,42,0.55)] hover:bg-slate-800'
                                 }`}
                         >
                             {formState === 'idle' && (
                                 <>
-                                    Send Message
+                                    Request Walkthrough
                                     <Send size={16} />
                                 </>
                             )}
                             {formState === 'sending' && <span className="animate-pulse">Sending...</span>}
                             {formState === 'success' && (
                                 <>
-                                    Message Sent
+                                    Request Received
                                     <CheckCircle size={16} />
                                 </>
                             )}
                             {formState === 'error' && (
                                 <>
-                                    Error - Retry
+                                    Error - Try Again
                                     <AlertCircle size={16} />
                                 </>
                             )}
                         </button>
-                        <p className="text-[10px] text-zinc-600 text-center mt-4 px-4 leading-relaxed">
-                            By submitting, I agree to the processing of my personal data by Hyzync in accordance with our <a href="/privacy" className="underline hover:text-zinc-400 transition-colors">Privacy Policy</a>.
+                        <p className="px-1 text-[11px] leading-relaxed text-slate-500">
+                            By submitting, I agree to the processing of my personal data by Hyzync in accordance with our <a href="/privacy" className="underline transition-colors hover:text-slate-700">Privacy Policy</a>.
                         </p>
                     </form>
                 </motion.div>
+                </div>
             </div>
         </section>
     );
 };
 
 const ContactItem = ({ icon: Icon, label, value }) => (
-    <div className="flex gap-5 items-center group">
-        <div className="w-12 h-12 rounded-2xl bg-[#1A1A1C] border border-white/5 flex items-center justify-center text-brand-purple group-hover:border-brand-purple/30 group-hover:bg-[#202022] transition-colors shadow-lg">
+    <div className="flex items-center gap-4 rounded-[24px] border border-slate-200 bg-white p-4 shadow-[0_18px_40px_-34px_rgba(15,23,42,0.25)]">
+        <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-cyan-50 text-cyan-700">
             <Icon size={20} />
         </div>
         <div>
-            <span className="block text-[10px] text-zinc-500 mb-1 uppercase tracking-widest font-bold opacity-60 group-hover:opacity-100 transition-opacity">{label}</span>
-            <span className="text-base font-medium text-white group-hover:text-brand-purple transition-colors">{value}</span>
+            <span className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">{label}</span>
+            <span className="text-sm font-medium leading-relaxed text-slate-700">{value}</span>
         </div>
     </div>
 );
@@ -232,30 +276,25 @@ const SocialBtn = ({ icon: Icon, href }) => (
         href={href}
         target="_blank"
         rel="noopener noreferrer"
-        className="w-12 h-12 rounded-xl bg-[#1A1A1C] border border-white/5 flex items-center justify-center text-zinc-400 hover:bg-brand-purple hover:text-white hover:border-brand-purple transition-all hover:-translate-y-1 shadow-lg"
+        className="flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-600 shadow-[0_18px_40px_-34px_rgba(15,23,42,0.25)] transition-all hover:-translate-y-0.5 hover:bg-slate-50 hover:text-cyan-700"
     >
-        <Icon size={20} />
+        <Icon size={18} />
     </a>
 );
 
-const InputGroup = ({ id, label, type = "text" }) => (
-    <div className="relative">
+const InputGroup = ({ id, label, type = 'text', placeholder = '' }) => (
+    <div className="space-y-2">
+        <label htmlFor={id} className="text-sm font-medium text-slate-700">
+            {label}
+        </label>
         <input
             type={type}
             id={id}
             name={id}
             required
-            className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-brand-purple/50 focus:bg-white/10 peer transition-all placeholder-transparent"
-            placeholder={label}
+            className="w-full rounded-[20px] border border-slate-200 bg-white px-4 py-3 text-slate-900 shadow-[0_14px_40px_-34px_rgba(15,23,42,0.28)] outline-none transition-all placeholder:text-slate-400 focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100"
+            placeholder={placeholder || label}
         />
-        <label
-            htmlFor={id}
-            className="absolute left-4 top-3 text-zinc-500 text-sm transition-all duration-300 pointer-events-none 
-            peer-focus:-top-2.5 peer-focus:left-3 peer-focus:text-xs peer-focus:text-brand-purple peer-focus:bg-transparent peer-focus:px-1 
-            peer-[:not(:placeholder-shown)]:-top-2.5 peer-[:not(:placeholder-shown)]:left-3 peer-[:not(:placeholder-shown)]:text-xs peer-[:not(:placeholder-shown)]:text-brand-purple peer-[:not(:placeholder-shown)]:bg-transparent peer-[:not(:placeholder-shown)]:px-1"
-        >
-            {label}
-        </label>
     </div>
 );
 

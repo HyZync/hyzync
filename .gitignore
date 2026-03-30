@@ -22,3 +22,39 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Env files
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env*
+
+# Python caches
+__pycache__/
+*.pyc
+*.pyo
+.ruff_cache/
+
+# Database files (runtime-generated)
+*.db
+*.db-shm
+*.db-wal
+
+# Debug and error dumps
+backend_debug.txt
+api_crash.txt
+critical_error.txt
+backend_functional_errors*.txt
+ruff_errors.json
+
+# Server logs
+*.err.log
+*.out.log
+backend_restart.log
+frontend_restart.log
+
+# Temp files
+tmp_*.py
+tmp_*.js

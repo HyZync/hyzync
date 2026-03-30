@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=Sora:wght@400;500;600;700;800&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -11,6 +13,61 @@
 
   body {
     @apply font-sans overflow-x-hidden antialiased;
+    font-family: 'Sora', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  }
+
+  /* Pro-grade focus ring for all interactive elements */
+  *:focus-visible {
+    outline: 2px solid rgba(99, 102, 241, 0.5);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  /* Premium selection color */
+  ::selection {
+    background-color: rgba(99, 102, 241, 0.2);
+    color: inherit;
+  }
+}
+
+@layer components {
+  /* Custom scrollbar — thin, translucent, SaaS-grade */
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 5px;
+    height: 5px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: rgba(148, 163, 184, 0.25);
+    border-radius: 999px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: rgba(148, 163, 184, 0.45);
+  }
+
+  /* Global scrollbar for body / overflow areas */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(148, 163, 184, 0.2);
+    border-radius: 999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(148, 163, 184, 0.4);
+  }
+
+  /* Skeleton shimmer for loading states */
+  .skeleton-shimmer {
+    background: linear-gradient(90deg, #f1f5f9 25%, #e2e8f0 50%, #f1f5f9 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
   }
 }
 
@@ -26,4 +83,301 @@
   .glass-card {
     @apply glass rounded-2xl shadow-lg;
   }
+}
+
+/* ── Keyframe Animations ── */
+@keyframes progress {
+  0% { background-position: 1rem 0; }
+  100% { background-position: 0 0; }
+}
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  10%, 30%, 50%, 70%, 90% { transform: translateX(-2px); }
+  20%, 40%, 60%, 80% { transform: translateX(2px); }
+}
+
+@keyframes slide-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes pulse-ring {
+  0% { transform: scale(0.8); opacity: 1; }
+  100% { transform: scale(2); opacity: 0; }
+}
+
+/* Apply animations via utility classes */
+.animate-shake { animation: shake 0.5s ease-in-out; }
+.animate-slide-up { animation: slide-up 0.4s ease-out; }
+.animate-fade-in { animation: fade-in 0.3s ease-out; }
+
+/* Horizon frosted light theme */
+.horizon-theme-frost {
+  --horizon-shell-bg: radial-gradient(120% 95% at 10% 0%, #edf2f7 0%, #e2e9f1 42%, #d6deea 100%);
+  --horizon-surface: rgba(244, 247, 251, 0.78);
+  --horizon-surface-strong: rgba(242, 246, 250, 0.92);
+  --horizon-soft: rgba(232, 237, 244, 0.82);
+  --horizon-border: rgba(51, 65, 85, 0.12);
+  --horizon-text: #161b23;
+  --horizon-muted: #4f5b6d;
+  --horizon-accent: #171b24;
+  --horizon-accent-soft: #2f3848;
+  --horizon-shadow: 0 26px 65px -46px rgba(15, 23, 42, 0.5);
+  color: var(--horizon-text);
+  background: var(--horizon-shell-bg);
+}
+
+.horizon-theme-frost .horizon-shell-bg {
+  background: var(--horizon-shell-bg) !important;
+}
+
+.horizon-theme-frost [class*='bg-white'] {
+  background-color: var(--horizon-surface-strong) !important;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.horizon-theme-frost [class*='bg-slate-50'] {
+  background-color: var(--horizon-soft) !important;
+}
+
+.horizon-theme-frost [class*='bg-slate-100'] {
+  background-color: rgba(223, 231, 240, 0.9) !important;
+}
+
+.horizon-theme-frost [class*='border-slate-100'],
+.horizon-theme-frost [class*='border-slate-200'],
+.horizon-theme-frost [class*='border-slate-300'],
+.horizon-theme-frost [class*='border-white'] {
+  border-color: var(--horizon-border) !important;
+}
+
+.horizon-theme-frost [class*='shadow'] {
+  box-shadow: var(--horizon-shadow) !important;
+}
+
+.horizon-theme-frost [class*='text-slate-950'],
+.horizon-theme-frost [class*='text-slate-900'] {
+  color: var(--horizon-text) !important;
+}
+
+.horizon-theme-frost [class*='text-slate-800'],
+.horizon-theme-frost [class*='text-slate-700'] {
+  color: #2b313d !important;
+}
+
+.horizon-theme-frost [class*='text-slate-600'],
+.horizon-theme-frost [class*='text-slate-500'],
+.horizon-theme-frost [class*='text-slate-400'] {
+  color: var(--horizon-muted) !important;
+}
+
+.horizon-theme-frost [class*='bg-slate-900'],
+.horizon-theme-frost [class*='bg-slate-800'] {
+  background-color: #343d4f !important;
+  border-color: rgba(53, 63, 82, 0.62) !important;
+  color: #f5f8ff !important;
+}
+
+.horizon-theme-frost [class*='bg-slate-900'] [class*='text-slate-300'],
+.horizon-theme-frost [class*='bg-slate-900'] [class*='text-slate-400'],
+.horizon-theme-frost [class*='bg-slate-900'] [class*='text-slate-500'],
+.horizon-theme-frost [class*='bg-slate-800'] [class*='text-slate-300'],
+.horizon-theme-frost [class*='bg-slate-800'] [class*='text-slate-400'],
+.horizon-theme-frost [class*='bg-slate-800'] [class*='text-slate-500'] {
+  color: #d8e0ef !important;
+}
+
+.horizon-theme-frost [class*='bg-indigo-'],
+.horizon-theme-frost [class*='bg-violet-'],
+.horizon-theme-frost [class*='bg-blue-'],
+.horizon-theme-frost [class*='bg-cyan-'],
+.horizon-theme-frost [class*='bg-sky-'] {
+  background-color: rgba(92, 107, 132, 0.14) !important;
+  border-color: rgba(70, 85, 109, 0.3) !important;
+  color: #243145 !important;
+}
+
+.horizon-theme-frost [class*='text-indigo-'],
+.horizon-theme-frost [class*='text-violet-'],
+.horizon-theme-frost [class*='text-blue-'],
+.horizon-theme-frost [class*='text-cyan-'],
+.horizon-theme-frost [class*='text-sky-'] {
+  color: #32435d !important;
+}
+
+.horizon-theme-frost [class*='border-indigo-'],
+.horizon-theme-frost [class*='border-violet-'],
+.horizon-theme-frost [class*='border-blue-'],
+.horizon-theme-frost [class*='border-cyan-'],
+.horizon-theme-frost [class*='border-sky-'] {
+  border-color: rgba(70, 85, 109, 0.28) !important;
+}
+
+.horizon-theme-frost [class*='from-indigo-'],
+.horizon-theme-frost [class*='from-violet-'],
+.horizon-theme-frost [class*='from-blue-'],
+.horizon-theme-frost [class*='from-cyan-'],
+.horizon-theme-frost [class*='from-sky-'] {
+  --tw-gradient-from: #4a556b var(--tw-gradient-from-position) !important;
+  --tw-gradient-to: rgb(74 85 107 / 0) var(--tw-gradient-to-position) !important;
+  --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to) !important;
+}
+
+.horizon-theme-frost [class*='to-indigo-'],
+.horizon-theme-frost [class*='to-violet-'],
+.horizon-theme-frost [class*='to-blue-'],
+.horizon-theme-frost [class*='to-cyan-'],
+.horizon-theme-frost [class*='to-sky-'] {
+  --tw-gradient-to: #6e7b95 var(--tw-gradient-to-position) !important;
+}
+
+.horizon-theme-frost .horizon-theme-static {
+  background: rgba(239, 244, 249, 0.94) !important;
+  border-color: var(--horizon-border) !important;
+  color: #2f3848 !important;
+  box-shadow: var(--horizon-shadow) !important;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+/* Horizon dark-mode fallback without rewriting every utility class */
+.horizon-theme-dark {
+  color-scheme: dark;
+  --horizon-dark-shell-bg: radial-gradient(120% 95% at 10% 0%, #48566c 0%, #374254 42%, #2f3746 100%);
+  --horizon-dark-surface: rgba(57, 68, 87, 0.78);
+  --horizon-dark-surface-strong: rgba(64, 77, 98, 0.9);
+  --horizon-dark-soft: rgba(78, 91, 113, 0.72);
+  --horizon-dark-border: rgba(226, 232, 240, 0.16);
+  --horizon-dark-text: #f7faff;
+  --horizon-dark-text-soft: #eef3fa;
+  --horizon-dark-muted: #d7e0eb;
+  --horizon-dark-shadow: 0 28px 72px -46px rgba(2, 6, 23, 0.68);
+  color: var(--horizon-dark-text);
+  background: var(--horizon-dark-shell-bg);
+}
+
+.horizon-theme-dark .horizon-shell-bg {
+  background: var(--horizon-dark-shell-bg) !important;
+}
+
+.horizon-theme-dark [class*='bg-white'] {
+  background-color: var(--horizon-dark-surface-strong) !important;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.horizon-theme-dark [class*='bg-slate-50'] {
+  background-color: var(--horizon-dark-soft) !important;
+}
+
+.horizon-theme-dark [class*='bg-slate-100'] {
+  background-color: rgba(92, 105, 128, 0.82) !important;
+}
+
+.horizon-theme-dark [class*='border-slate-100'],
+.horizon-theme-dark [class*='border-slate-200'],
+.horizon-theme-dark [class*='border-slate-300'],
+.horizon-theme-dark [class*='border-white'] {
+  border-color: var(--horizon-dark-border) !important;
+}
+
+.horizon-theme-dark [class*='shadow'] {
+  box-shadow: var(--horizon-dark-shadow) !important;
+}
+
+.horizon-theme-dark [class*='text-slate-950'],
+.horizon-theme-dark [class*='text-slate-900'] {
+  color: var(--horizon-dark-text) !important;
+}
+
+.horizon-theme-dark [class*='text-slate-800'],
+.horizon-theme-dark [class*='text-slate-700'] {
+  color: var(--horizon-dark-text-soft) !important;
+}
+
+.horizon-theme-dark [class*='text-slate-600'],
+.horizon-theme-dark [class*='text-slate-500'],
+.horizon-theme-dark [class*='text-slate-400'] {
+  color: var(--horizon-dark-muted) !important;
+}
+
+.horizon-theme-dark [class*='bg-slate-900'],
+.horizon-theme-dark [class*='bg-slate-800'] {
+  background-color: #596883 !important;
+  border-color: rgba(226, 232, 240, 0.2) !important;
+  color: #fbfdff !important;
+}
+
+.horizon-theme-dark [class*='bg-slate-900'] [class*='text-slate-300'],
+.horizon-theme-dark [class*='bg-slate-900'] [class*='text-slate-400'],
+.horizon-theme-dark [class*='bg-slate-900'] [class*='text-slate-500'],
+.horizon-theme-dark [class*='bg-slate-800'] [class*='text-slate-300'],
+.horizon-theme-dark [class*='bg-slate-800'] [class*='text-slate-400'],
+.horizon-theme-dark [class*='bg-slate-800'] [class*='text-slate-500'] {
+  color: #eef4fb !important;
+}
+
+.horizon-theme-dark [class*='bg-indigo-'],
+.horizon-theme-dark [class*='bg-violet-'],
+.horizon-theme-dark [class*='bg-blue-'],
+.horizon-theme-dark [class*='bg-cyan-'],
+.horizon-theme-dark [class*='bg-sky-'] {
+  background-color: rgba(128, 147, 181, 0.34) !important;
+  border-color: rgba(226, 232, 240, 0.18) !important;
+  color: #f7fbff !important;
+}
+
+.horizon-theme-dark [class*='text-indigo-'],
+.horizon-theme-dark [class*='text-violet-'],
+.horizon-theme-dark [class*='text-blue-'],
+.horizon-theme-dark [class*='text-cyan-'],
+.horizon-theme-dark [class*='text-sky-'] {
+  color: #f3f8ff !important;
+}
+
+.horizon-theme-dark [class*='border-indigo-'],
+.horizon-theme-dark [class*='border-violet-'],
+.horizon-theme-dark [class*='border-blue-'],
+.horizon-theme-dark [class*='border-cyan-'],
+.horizon-theme-dark [class*='border-sky-'] {
+  border-color: rgba(226, 232, 240, 0.22) !important;
+}
+
+.horizon-theme-dark [class*='from-indigo-'],
+.horizon-theme-dark [class*='from-violet-'],
+.horizon-theme-dark [class*='from-blue-'],
+.horizon-theme-dark [class*='from-cyan-'],
+.horizon-theme-dark [class*='from-sky-'] {
+  --tw-gradient-from: #93a7cb var(--tw-gradient-from-position) !important;
+  --tw-gradient-to: rgb(147 167 203 / 0) var(--tw-gradient-to-position) !important;
+  --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to) !important;
+}
+
+.horizon-theme-dark [class*='to-indigo-'],
+.horizon-theme-dark [class*='to-violet-'],
+.horizon-theme-dark [class*='to-blue-'],
+.horizon-theme-dark [class*='to-cyan-'],
+.horizon-theme-dark [class*='to-sky-'] {
+  --tw-gradient-to: #657896 var(--tw-gradient-to-position) !important;
+}
+
+.horizon-theme-dark .horizon-theme-static {
+  background: rgba(64, 77, 98, 0.92) !important;
+  border-color: var(--horizon-dark-border) !important;
+  color: var(--horizon-dark-text) !important;
+  box-shadow: var(--horizon-dark-shadow) !important;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
 }

@@ -17,7 +17,7 @@ const Founder = () => {
                 transition={{ duration: 0.8 }}
                 className="relative z-10 max-w-5xl w-full"
             >
-                <div className="glass-card overflow-hidden border-white-10 bg-white/5 backdrop-blur-xl rounded-[2.5rem]">
+                <div className="glass-card overflow-hidden border-white-10 bg-white/5 backdrop-blur-xl rounded-2xl">
                     <div className="grid grid-cols-1 lg:grid-cols-5 gap-0">
                         {/* Profile Image/Visual Area */}
                         <div className="lg:col-span-2 bg-gradient-to-br from-brand-purple/20 via-brand-blue/10 to-transparent p-12 flex flex-col items-center justify-center border-r border-white-10 relative overflow-hidden">
@@ -25,7 +25,7 @@ const Founder = () => {
                                 initial={{ opacity: 0, y: 20 }}
                                 animate={{ opacity: 1, y: 0 }}
                                 transition={{ delay: 0.3 }}
-                                className="w-48 h-48 rounded-3xl border-2 border-brand-purple/30 bg-black/40 flex items-center justify-center relative z-10"
+                                className="w-48 h-48 rounded-2xl border-2 border-brand-purple/30 bg-black/40 flex items-center justify-center relative z-10"
                             >
                                 <Sparkles className="w-20 h-20 text-brand-purple/60" />
                                 {/* This would be where an image goes if provided, for now a stylish placeholder */}

@@ -1,0 +1,107 @@
+[
+    {
+        "id": "DEMO-001",
+        "content": "Been using this CRM for 2 years. Overall it's decent but the new UI update last month completely broke the reporting dashboard. I can't export my monthly sales figures to CSV anymore without the app crashing. If this isn't fixed soon I'll have to switch to Salesforce.",
+        "score": 2,
+        "date": "2024-05-12",
+        "source": "G2"
+    },
+    {
+        "id": "DEMO-002",
+        "content": "Great tool for small teams. The interface is intuitive and the customer support team (specially Sarah) is amazing. I just wish there was a native Slack integration, currently I have to use Zapier to get notifications which is annoying.",
+        "score": 4,
+        "date": "2024-05-10",
+        "source": "Capterra"
+    },
+    {
+        "id": "DEMO-003",
+        "content": "Terrible experience. They billed my credit card for an annual subscription after the 14-day trial without any warning email. The cancellation process is hidden 5 menus deep. I want a refund.",
+        "score": 1,
+        "date": "2024-05-08",
+        "source": "Trustpilot"
+    },
+    {
+        "id": "DEMO-004",
+        "content": "Solid platform, does exactly what it says on the tin. The pricing is a bit steep for solo founders though. A cheaper 'lite' tier would be highly appreciated.",
+        "score": 4,
+        "date": "2024-05-05",
+        "source": "Twitter"
+    },
+    {
+        "id": "DEMO-005",
+        "content": "The mobile app is useless. Half the time it logs me out randomly, and the sync feature simply doesn't work when I'm offline. Please fix the Android app, it's lagging behind the iOS version.",
+        "score": 2,
+        "date": "2024-05-01",
+        "source": "Play Store"
+    },
+    {
+        "id": "DEMO-006",
+        "content": "Game changer for our marketing department. The automation sequences have saved us at least 10 hours a week. The only downside is that the email builder templates look a bit dated from 2015.",
+        "score": 5,
+        "date": "2024-04-28",
+        "source": "G2"
+    },
+    {
+        "id": "DEMO-007",
+        "content": "I don't understand how to use the advanced analytics tab. The documentation is extremely poor and outdated. I tried reaching out to support but got an automated bot response that didn't help at all.",
+        "score": 3,
+        "date": "2024-04-25",
+        "source": "Trustpilot"
+    },
+    {
+        "id": "DEMO-008",
+        "content": "It's okay. Sometimes the server is really slow during US peak hours (around 2pm EST). When I click 'save' it hangs for like 5 seconds.",
+        "score": 3,
+        "date": "2024-04-20",
+        "source": "Capterra"
+    },
+    {
+        "id": "DEMO-009",
+        "content": "Absolutely love the new Dark Mode! It's so much easier on the eyes during late-night coding sessions. Keep up the good work team.",
+        "score": 5,
+        "date": "2024-04-18",
+        "source": "Product Hunt"
+    },
+    {
+        "id": "DEMO-010",
+        "content": "Warning: Do not use! Their recent privacy policy update states they can use our uploaded client data to train their AI models. We deal with healthcare data (HIPAA) so we had to immediately migrate off the platform.",
+        "score": 1,
+        "date": "2024-04-15",
+        "source": "G2"
+    },
+    {
+        "id": "DEMO-011",
+        "content": "This app is heavily missing a two-factor authentication (2FA) security layer. In 2024, enforcing 2FA shouldn't be a premium enterprise feature, it should be standard. Until then, my team is holding off on adopting it company-wide.",
+        "score": 3,
+        "date": "2024-04-10",
+        "source": "Twitter"
+    },
+    {
+        "id": "DEMO-012",
+        "content": "I signed up primarily for the auto-categorization feature. Huge mistake! The categorizer is a black box and mislabels 40% of our incoming tickets. If I can't manually override the AI categorization easily, the product isn't production-ready.",
+        "score": 2,
+        "date": "2024-04-05",
+        "source": "Trustpilot"
+    },
+    {
+        "id": "DEMO-013",
+        "content": "Really smooth onboarding. It walked me right through connecting my database, setting up my first pipeline, and generating the dashboard. Found immense value within 20 minutes.",
+        "score": 5,
+        "date": "2024-04-01",
+        "source": "G2"
+    },
+    {
+        "id": "DEMO-014",
+        "content": "My primary complaint is the lack of bulk actions. Right now, if I want to delete 50 archived projects, I have to click 'Delete' and confirm 50 times. A simple checkbox system to select all and delete would save me immense frustration.",
+        "score": 3,
+        "date": "2024-03-25",
+        "source": "Capterra"
+    },
+    {
+        "id": "DEMO-015",
+        "content": "I don't recommend this. During the deployment process, their database connection string parser strips special characters from passwords, literally making it impossible to connect to a secure DB. Had to rewrite our password policy just to test this tool.",
+        "score": 1,
+        "date": "2024-03-20",
+        "source": "G2"
+    }
+]

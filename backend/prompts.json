@@ -1,0 +1,707 @@
+{
+    "domain_config": {
+        "generic": {
+            "focus_keywords": "general usability, price, customer support, features, bugs, financial loss, brand reputation, competitor comparison",
+            "retention_keywords": [
+                "cancel",
+                "refund",
+                "price",
+                "disappointed",
+                "slow",
+                "bug"
+            ],
+            "brand_risk_keywords": [
+                "scam",
+                "fraud",
+                "unethical",
+                "dangerous",
+                "unsafe",
+                "lawsuit",
+                "illegal",
+                "discrimination",
+                "offensive",
+                "public relations",
+                "boycott",
+                "hacked",
+                "security breach",
+                "fake reviews"
+            ],
+            "competitor_keywords": [
+                "competitor",
+                "alternative",
+                "switch to",
+                "better than",
+                "worse than",
+                "compared to",
+                "other app",
+                "market leader",
+                "industry standard"
+            ],
+            "retention_alert_threshold": 2.0,
+            "renewal_friction_keywords": [
+                "renew",
+                "renewal",
+                "auto-renew",
+                "auto-renewal",
+                "billing cycle",
+                "subscription",
+                "price increase",
+                "pricing change",
+                "cancel",
+                "cancellation",
+                "hard to cancel",
+                "difficult to cancel",
+                "unsubscribe",
+                "refund",
+                "charge",
+                "unexpected charge",
+                "hidden fee",
+                "contract",
+                "billing issue",
+                "billing problem",
+                "payment failed",
+                "overcharged"
+            ]
+        },
+        "subscription": {
+            "focus_keywords": "cancel, renewal, price, content library, ad experience, customer support response time, technical bugs, value for money, hidden costs",
+            "retention_keywords": [
+                "cancel",
+                "unsubscribe",
+                "renewal notice",
+                "switch",
+                "waste of money",
+                "not worth the price",
+                "content bored"
+            ],
+            "brand_risk_keywords": [
+                "predatory",
+                "trap",
+                "scam",
+                "thieves",
+                "stole my money",
+                "unauthorized charge",
+                "dark pattern",
+                "impossible to cancel",
+                "held hostage",
+                "reported to bank"
+            ],
+            "competitor_keywords": [
+                "netflix",
+                "disney+",
+                "hulu",
+                "spotify",
+                "youtube premium",
+                "prime video",
+                "apple tv",
+                "better quality",
+                "cheaper alternative",
+                "more content"
+            ],
+            "retention_alert_threshold": 3.0,
+            "renewal_friction_keywords": [
+                "renewal notice",
+                "renewal reminder",
+                "renewal price",
+                "price hike",
+                "contract renewal",
+                "automatic renewal",
+                "auto-renewal",
+                "forced renewal",
+                "locked in",
+                "cancel subscription",
+                "cancellation fee",
+                "early termination",
+                "won't let me cancel",
+                "hard to unsubscribe",
+                "billing surprise",
+                "unexpected charge",
+                "didn't authorize",
+                "forgot to cancel",
+                "sneaky renewal"
+            ]
+        },
+        "d2c": {
+            "focus_keywords": "product quality, packaging integrity, delivery speed, scent/taste, effectiveness, pricing/value, brand trust, sustainability",
+            "retention_keywords": [
+                "never buying again",
+                "refund",
+                "returned",
+                "broken",
+                "wrong color",
+                "delivery disaster",
+                "misleading ad"
+            ],
+            "brand_risk_keywords": [
+                "counterfeit",
+                "fake product",
+                "toxic",
+                "allergy",
+                "unsafe",
+                "health hazard",
+                "expired",
+                "contaminated",
+                "animal testing",
+                "recall"
+            ],
+            "competitor_keywords": [
+                "amazon",
+                "local store",
+                "competitor name",
+                "cheaper elsewhere",
+                "better quality",
+                "free shipping",
+                "faster delivery",
+                "sustainable alternative"
+            ],
+            "retention_alert_threshold": 5.0,
+            "renewal_friction_keywords": [
+                "subscription box",
+                "recurring order",
+                "auto-ship",
+                "cancel subscription",
+                "skip shipment",
+                "pause subscription",
+                "delivery frequency",
+                "charged again",
+                "didn't order",
+                "unexpected delivery",
+                "refund policy",
+                "return hassle",
+                "restocking fee"
+            ]
+        },
+        "ecommerce": {
+            "focus_keywords": "checkout process, refund policy, payment gateway, delivery tracking, customer support experience, item availability, fraud prevention, trust",
+            "retention_keywords": [
+                "cancel order",
+                "refund delay",
+                "payment failed",
+                "checkout error",
+                "never received",
+                "wrong item sent"
+            ],
+            "brand_risk_keywords": [
+                "data leak",
+                "credit card theft",
+                "identity theft",
+                "selling data",
+                "spam",
+                "phishing",
+                "fake site",
+                "scam listing",
+                "counterfeit goods"
+            ],
+            "competitor_keywords": [
+                "amazon",
+                "ebay",
+                "walmart",
+                "etsy",
+                "shopify",
+                "free shipping",
+                "better return policy",
+                "price match",
+                "faster shipping"
+            ],
+            "retention_alert_threshold": 4.0,
+            "renewal_friction_keywords": [
+                "membership fee",
+                "prime subscription",
+                "loyalty program",
+                "cancel membership",
+                "membership renewal",
+                "auto-renew",
+                "cancel order",
+                "refund delay",
+                "refund denied",
+                "payment issue",
+                "double charged",
+                "unauthorized charge",
+                "billing error"
+            ]
+        },
+        "financial_services": {
+            "focus_keywords": "claim process, hidden fees, trust, data security, response time, clarity of charges, app stability, compliance, fraud",
+            "retention_keywords": [
+                "close account",
+                "complaint",
+                "legal",
+                "charge dispute",
+                "hidden fee",
+                "lost trust",
+                "switching banks"
+            ],
+            "brand_risk_keywords": [
+                "fraud",
+                "money laundering",
+                "data breach",
+                "hacked account",
+                "identity theft",
+                "regulatory violation",
+                "lawsuit",
+                "class action",
+                "predatory lending",
+                "discrimination"
+            ],
+            "competitor_keywords": [
+                "chase",
+                "amex",
+                "well fargo",
+                "citi",
+                "better rates",
+                "lower fees",
+                "rewards program",
+                "cash back",
+                "sign up bonus"
+            ],
+            "retention_alert_threshold": 2.5,
+            "renewal_friction_keywords": [
+                "annual fee",
+                "renewal fee",
+                "account fee",
+                "hidden charge",
+                "unexpected fee",
+                "maintenance fee",
+                "close account",
+                "transfer funds",
+                "switch bank",
+                "fee dispute",
+                "charge dispute",
+                "billing error",
+                "overdraft",
+                "penalty fee",
+                "service charge"
+            ]
+        },
+        "travel_hospitality": {
+            "focus_keywords": "booking experience, refund policy, staff politeness, cleanliness, price fairness, driver/pilot service, safety, hygiene",
+            "retention_keywords": [
+                "cancellation fee",
+                "never again",
+                "wrong booking",
+                "rude staff",
+                "dirty room",
+                "overcharged",
+                "misleading price"
+            ],
+            "brand_risk_keywords": [
+                "bed bugs",
+                "food poisoning",
+                "unsafe",
+                "security threat",
+                "discrimination",
+                "accident",
+                "injury",
+                "lawsuit",
+                "stranded",
+                "lost luggage"
+            ],
+            "competitor_keywords": [
+                "airbnb",
+                "uber",
+                "expedia",
+                "booking.com",
+                "better price",
+                "better location",
+                "more amenities",
+                "free breakfast",
+                "free cancellation"
+            ],
+            "retention_alert_threshold": 5.5,
+            "renewal_friction_keywords": [
+                "membership renewal",
+                "loyalty points",
+                "cancel booking",
+                "cancellation policy",
+                "refund policy",
+                "no refund",
+                "cancellation fee",
+                "change fee",
+                "booking error",
+                "wrong price",
+                "price increase",
+                "hidden charges",
+                "resort fee",
+                "service charge"
+            ]
+        },
+        "hardware": {
+            "focus_keywords": "app connection, pairing, setup, stability, firmware, device control, physical quality, battery life, safety, longevity",
+            "retention_keywords": [
+                "uninstalled the app",
+                "unusable",
+                "never connects",
+                "brick",
+                "lagging",
+                "throwing it out"
+            ],
+            "brand_risk_keywords": [
+                "fire hazard",
+                "overheating",
+                "privacy violation",
+                "spying",
+                "camera hack",
+                "security vulnerability",
+                "brick device",
+                "planned obsolescence",
+                "e-waste"
+            ],
+            "competitor_keywords": [
+                "apple",
+                "samsung",
+                "google",
+                "sony",
+                "cheaper model",
+                "better battery",
+                "easier setup",
+                "more features",
+                "works offline"
+            ],
+            "retention_alert_threshold": 6.0,
+            "renewal_friction_keywords": [
+                "subscription service",
+                "premium features",
+                "cancel subscription",
+                "app subscription",
+                "cloud storage fee",
+                "monthly fee",
+                "pay wall",
+                "forced upgrade",
+                "warranty renewal",
+                "extended warranty",
+                "support plan",
+                "service plan"
+            ]
+        },
+        "saas": {
+            "focus_keywords": "subscription renewal, feature gaps, onboarding friction, API reliability, pricing tiers, integration issues, uptime, user seat management, billing cycle, contract terms",
+            "retention_keywords": [
+                "cancel subscription",
+                "not renewing",
+                "too expensive",
+                "switching to",
+                "downgrade",
+                "missing features",
+                "waste of money"
+            ],
+            "brand_risk_keywords": [
+                "data breach",
+                "security flaw",
+                "downtime",
+                "data loss",
+                "vendor lock-in",
+                "compliance violation",
+                "unauthorized access"
+            ],
+            "competitor_keywords": [
+                "salesforce",
+                "hubspot",
+                "slack",
+                "notion",
+                "better alternative",
+                "cheaper tool",
+                "competitor",
+                "open source"
+            ],
+            "retention_alert_threshold": 2.5,
+            "renewal_friction_keywords": [
+                "renewal price",
+                "annual contract",
+                "auto-renewal",
+                "price increase",
+                "seat license",
+                "billing cycle",
+                "cancel subscription",
+                "downgrade plan",
+                "enterprise pricing",
+                "hidden costs",
+                "overage charges",
+                "usage limits"
+            ]
+        },
+        "mobile_app": {
+            "focus_keywords": "app crashes, battery drain, UI/UX friction, subscription renewal, in-app purchases, push notifications, storage usage, performance lag, login issues, feature requests",
+            "retention_keywords": [
+                "uninstalling",
+                "deleting app",
+                "cancel subscription",
+                "waste of storage",
+                "too many ads",
+                "drains battery",
+                "crashes constantly"
+            ],
+            "brand_risk_keywords": [
+                "privacy violation",
+                "tracking",
+                "malware",
+                "data mining",
+                "children safety",
+                "inappropriate content",
+                "permissions abuse"
+            ],
+            "competitor_keywords": [
+                "alternative app",
+                "better app",
+                "switching to",
+                "competitor app",
+                "free alternative",
+                "lighter app"
+            ],
+            "retention_alert_threshold": 3.5,
+            "renewal_friction_keywords": [
+                "subscription renewal",
+                "auto-renew",
+                "cancel subscription",
+                "in-app purchase",
+                "premium features",
+                "free trial ended",
+                "price increase",
+                "paywall",
+                "refund request",
+                "charged unexpectedly"
+            ]
+        },
+        "telecom": {
+            "focus_keywords": "network reliability, billing errors, plan pricing, coverage gaps, data speed, roaming charges, customer support wait time, contract terms, 5G availability, signal strength",
+            "retention_keywords": [
+                "switching carrier",
+                "port number",
+                "cancel plan",
+                "overcharged",
+                "no signal",
+                "terrible coverage",
+                "rip off"
+            ],
+            "brand_risk_keywords": [
+                "data throttling",
+                "hidden fees",
+                "unauthorized charges",
+                "privacy breach",
+                "outage",
+                "service disruption",
+                "deceptive advertising"
+            ],
+            "competitor_keywords": [
+                "verizon",
+                "t-mobile",
+                "at&t",
+                "mint mobile",
+                "better coverage",
+                "cheaper plan",
+                "unlimited data",
+                "faster network"
+            ],
+            "retention_alert_threshold": 2.0,
+            "renewal_friction_keywords": [
+                "contract renewal",
+                "plan renewal",
+                "price increase",
+                "billing error",
+                "unexpected charge",
+                "early termination",
+                "cancel service",
+                "switch provider",
+                "overcharged",
+                "data cap",
+                "throttled",
+                "hidden fee"
+            ]
+        },
+        "insurance": {
+            "focus_keywords": "claim processing delays, policy clarity, premium pricing, agent responsiveness, coverage gaps, denial reasons, documentation requirements, renewal terms, deductible confusion, payout speed",
+            "retention_keywords": [
+                "cancel policy",
+                "switching insurer",
+                "claim denied",
+                "premium too high",
+                "not covered",
+                "waste of premium",
+                "filing complaint"
+            ],
+            "brand_risk_keywords": [
+                "fraud",
+                "bad faith",
+                "lawsuit",
+                "regulatory complaint",
+                "denial of claim",
+                "discriminatory practices",
+                "predatory pricing"
+            ],
+            "competitor_keywords": [
+                "geico",
+                "progressive",
+                "state farm",
+                "allstate",
+                "better rates",
+                "lower premium",
+                "better coverage",
+                "faster claims"
+            ],
+            "retention_alert_threshold": 2.0,
+            "renewal_friction_keywords": [
+                "policy renewal",
+                "premium increase",
+                "renewal notice",
+                "auto-renewal",
+                "cancel policy",
+                "switch insurer",
+                "rate hike",
+                "coverage change",
+                "deductible increase",
+                "non-renewal",
+                "lapse coverage",
+                "payment failed"
+            ]
+        },
+        "food_delivery": {
+            "focus_keywords": "delivery speed, order accuracy, driver experience, food quality on arrival, pricing and fees, subscription value, restaurant selection, app stability, refund process, customer support",
+            "retention_keywords": [
+                "cancel subscription",
+                "uninstalling",
+                "too expensive",
+                "cold food",
+                "wrong order",
+                "never ordering again",
+                "terrible service"
+            ],
+            "brand_risk_keywords": [
+                "food safety",
+                "contamination",
+                "driver harassment",
+                "data breach",
+                "surge pricing",
+                "tip theft",
+                "discriminatory practices"
+            ],
+            "competitor_keywords": [
+                "uber eats",
+                "doordash",
+                "grubhub",
+                "instacart",
+                "better prices",
+                "faster delivery",
+                "free delivery",
+                "more restaurants"
+            ],
+            "retention_alert_threshold": 4.0,
+            "renewal_friction_keywords": [
+                "subscription fee",
+                "delivery pass",
+                "cancel subscription",
+                "membership renewal",
+                "price increase",
+                "service fee",
+                "hidden charges",
+                "delivery fee",
+                "tip policy",
+                "minimum order"
+            ]
+        }
+    },
+    "vertical_terminology": {
+        "generic": {
+            "churn_label": "Churn Risk",
+            "pain_point_label": "Failure Surfaces",
+            "feature_request_label": "Revenue Expansion Demand",
+            "negative_label": "At-Risk Customer Signals"
+        },
+        "subscription": {
+            "churn_label": "Renewal Leakage",
+            "pain_point_label": "Cancellation Drivers",
+            "feature_request_label": "Retention Hooks",
+            "negative_label": "Subscriber Flight Risk"
+        },
+        "d2c": {
+            "churn_label": "Repeat Purchase Breakdown",
+            "pain_point_label": "Conversion Killers",
+            "feature_request_label": "Product Demand Signals",
+            "negative_label": "Lost Customer Signals"
+        },
+        "ecommerce": {
+            "churn_label": "Cart Abandonment Risk",
+            "pain_point_label": "Checkout Friction",
+            "feature_request_label": "Revenue Opportunity Signals",
+            "negative_label": "Purchase Blockers"
+        },
+        "financial_services": {
+            "churn_label": "Trust Erosion Signals",
+            "pain_point_label": "Compliance Friction",
+            "feature_request_label": "Security Enhancement Demand",
+            "negative_label": "Account Closure Risk"
+        },
+        "travel_hospitality": {
+            "churn_label": "Rebooking Risk",
+            "pain_point_label": "Experience Failures",
+            "feature_request_label": "Service Enhancement Demand",
+            "negative_label": "Lost Guest Signals"
+        },
+        "hardware": {
+            "churn_label": "Device Abandonment Risk",
+            "pain_point_label": "Integration Failures",
+            "feature_request_label": "Feature Gap Demand",
+            "negative_label": "Return Risk Signals"
+        },
+        "saas": {
+            "churn_label": "Renewal Churn Risk",
+            "pain_point_label": "Product Friction Surfaces",
+            "feature_request_label": "Feature Gap Demand",
+            "negative_label": "Renewal Risk Signals"
+        },
+        "mobile_app": {
+            "churn_label": "Uninstall Risk",
+            "pain_point_label": "App Experience Failures",
+            "feature_request_label": "Feature Enhancement Demand",
+            "negative_label": "App Abandonment Signals"
+        },
+        "telecom": {
+            "churn_label": "Carrier Switch Risk",
+            "pain_point_label": "Network & Billing Failures",
+            "feature_request_label": "Plan Enhancement Demand",
+            "negative_label": "Service Exit Signals"
+        },
+        "insurance": {
+            "churn_label": "Policy Lapse Risk",
+            "pain_point_label": "Claims & Coverage Friction",
+            "feature_request_label": "Coverage Enhancement Demand",
+            "negative_label": "Policyholder Flight Risk"
+        },
+        "food_delivery": {
+            "churn_label": "Order Abandonment Risk",
+            "pain_point_label": "Delivery Experience Failures",
+            "feature_request_label": "Service Enhancement Demand",
+            "negative_label": "Customer Defection Signals"
+        }
+    },
+    "lists": {
+        "all_emotions": [
+            "Satisfaction",
+            "Delight",
+            "Excitement",
+            "Trust",
+            "Empathy",
+            "Gratitude",
+            "Surprise",
+            "Curiosity",
+            "Hopefulness",
+            "Skepticism",
+            "Frustration",
+            "Disappointment",
+            "Sadness",
+            "Disgust",
+            "Anger",
+            "Confusion",
+            "Anxiety",
+            "Dissatisfied"
+        ],
+        "pain_points": "Billing/Feature/UX/Bug/Support/Other/Value",
+        "intents": "Praise/Complaint/Suggest/Recommend/Question/Inform/Informative",
+        "urgency_levels": "High/Medium/Low/None",
+        "segments": "New/Veteran/Detractor/Promoter/Neutral",
+        "churn_risks": "high/medium/low/null",
+        "sentiments": "positive/negative/neutral"
+    },
+    "json_schema_template": "{\n  \"review_id\": ${review_id},\n  \"sentiment\": \"${sentiments}\",\n  \"sentiment_score\": 0.8, // FLOAT from -1.0 (very negative) to 1.0 (very positive)\n  \"confidence\": 0.9, // FLOAT from 0.0 to 1.0\n  \"issue\": \"specific complaint or null (MAX 8 WORDS)\",\n  \"churn_risk\": \"${churn_risks}\",\n  \"pain_point_category\": \"${pain_points}\",\n  \"root_cause\": \"brief underlying problem (MAX 5 WORDS)\",\n  \"feature_request\": \"Specific user request or 'None' (MAX 10 WORDS)\",\n  \"trending_theme\": \"Most common theme or 'None' (MAX 5 WORDS)\",\n  \"emerging_theme\": \"Uncommon theme or 'None' (MAX 5 WORDS)\",\n  \"intent\": \"${intents}\",\n  \"emotions\": [\"Satisfaction\", \"Disappointment\"], // ARRAY of 1 to 3 items from the EMOTIONS LIST\n  \"urgency\": \"${urgency}\",\n  \"user_segment\": \"${segments}\",\n  \"domain_insight\": \"One concise, vertical-specific observation based on '${vertical}' focus (MAX 15 WORDS)\" // NEW FIELD\n}",
+    "prompt_template": "TASK: Analyze the single app review below. Your output **MUST ONLY** be a **minimal, single-line JSON object** that adheres strictly to the provided SCHEMA and RULES.\n\nVERTICAL FOCUS: ${vertical_upper} (Focus on the following concepts for 'domain_insight': ${focus_keywords})${custom_instructions}\nEMOTIONS LIST (for 'emotions' field): ${emotions_list}\n\nOUTPUT RULES:\n1. Output MUST ONLY be a valid, single-line JSON object. No markdown, no pre-amble, no conversational text.\n2. Adhere strictly to the JSON SCHEMA and word/list constraints.\n3. **CRITICAL JSON RULE (NEW):** Ensure ALL string values, especially 'issue', 'root_cause', 'domain_insight', are correctly JSON-escaped. Internal double quotes must be \\\", and internal backslashes must be \\\\. Do NOT use raw newlines or tabs.\n4. **SENTIMENT SCORE GUIDANCE:** Map the user's 1-5 Rating to the sentiment_score float (e.g., Rating 5/4 -> Score > 0.5. Rating 3 -> Score between -0.5 and 0.5. Rating 2/1 -> Score < -0.5).\n5. 'emotions' MUST be an array of 1 to 3 strings from the EMOTIONS LIST.\n6. Categories MUST match the lists provided in the JSON SCHEMA.\n7. **Domain Insight:** MUST relate to the '${vertical_upper}' vertical and its focus keywords.\n\nJSON SCHEMA: ${json_schema}\n\nREVIEW CONTENT: \nRating: ${rating}/5\nText: ${content}",
+    "quick_json_schema_template": "{\n  \"review_id\": ${review_id},\n  \"sentiment\": \"${sentiments}\",\n  \"sentiment_score\": 0.8, // FLOAT from -1.0 (very negative) to 1.0 (very positive)\n  \"confidence\": 0.9, // FLOAT from 0.0 to 1.0\n  \"churn_risk\": \"${churn_risks}\"\n}",
+    "quick_prompt_template": "TASK: Quickly analyze the sentiment and health of this app review. Output **ONLY** a **minimal, single-line JSON object**.\n\nOUTPUT RULES:\n1. Output MUST ONLY be a valid, single-line JSON object. No markdown, no explanations.\n2. **SENTIMENT SCORE:** Map the 1-5 Rating to sentiment_score (Rating 5/4 -> >0.5, Rating 3 -> -0.5 to 0.5, Rating 2/1 -> <-0.5).\n3. **CHURN RISK:** 'high' if user expresses cancellation/refund intent, 'medium' for strong negative sentiment, 'low' otherwise.\n4. **CONFIDENCE:** 0.8-1.0 for clear sentiment, 0.5-0.8 for moderate clarity, below 0.5 for ambiguous.\n\nJSON SCHEMA: ${json_schema}\n\nREVIEW:\nRating: ${rating}/5\nText: ${content}"
+}
