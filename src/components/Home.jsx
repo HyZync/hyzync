@@ -7,6 +7,7 @@ import {
     CheckCircle2,
     FileSpreadsheet,
     Layers,
+    MessageSquareQuote,
     ShieldAlert,
     Sparkles,
     Target,
@@ -20,8 +21,8 @@ import logoWebhook from '../assets/webhook.png';
 import logoCsv from '../assets/xcel.png';
 import logoHubSpot from '../assets/hubspot.svg';
 import logoTrustpilot from '../assets/trustpilot.svg';
-import { useHorizonPreviewNotice } from './HorizonPreviewNoticeProvider';
 import Contact from './Contact';
+import { useHorizonAvailabilityNotice } from './HorizonAvailabilityNoticeProvider';
 
 const quickStats = [
     ['7+', 'sources connected'],
@@ -144,6 +145,37 @@ const steps = [
     }
 ];
 
+const feedbackDemo = {
+    source: 'App Store review',
+    app: 'OrbitFlow iOS',
+    plan: 'Annual Pro subscription',
+    rating: '2-star',
+    author: 'Maya K.',
+    persona: 'Power user',
+    tenure: '14 months active',
+    renewalWindow: 'Due in 3 days',
+    status: 'Renewal cancelled',
+    summary: 'Billing access broke right before renewal.',
+    quote: 'Logged out again, paywall back, and support arrived too late.',
+    feedback:
+        'I like the product, but I keep getting logged out and the paywall shows up again even though I already paid for Pro. Support replied too late, so I cancelled my renewal for now.'
+};
+
+const feedbackReviewTags = [feedbackDemo.source, feedbackDemo.app, feedbackDemo.rating];
+
+const feedbackSentimentSummary = [
+    { label: 'Primary sentiment', value: 'Negative', tone: 'rose' },
+    { label: 'Business risk', value: 'High churn risk', tone: 'amber' },
+    { label: 'Owning teams', value: 'Product + Support', tone: 'cyan' }
+];
+
+const feedbackMainProblem = {
+    title: 'Billing and entitlement mismatch',
+    problem: 'The subscriber keeps losing Pro access and sees the paywall again right before renewal.',
+    impact: 'Because support replies too late, the account cancels before the team can recover it.',
+    retention: 'Send a rescue note, restore access, add a credit, and escalate billing.'
+};
+
 const teamCards = [
     ['Product', 'Prioritize roadmap work that improves adoption and retention.'],
     ['Support', 'Catch repeating pain before it becomes ticket volume.'],
@@ -155,7 +187,7 @@ const bars = [24, 36, 48, 44, 61, 74, 66, 84];
 
 const Home = () => {
     const navigate = useNavigate();
-    const { openHorizonPreviewNotice } = useHorizonPreviewNotice();
+    const { openHorizonAvailabilityNotice } = useHorizonAvailabilityNotice();
     const [activeLogoIndex, setActiveLogoIndex] = useState(0);
 
     useEffect(() => {
@@ -175,14 +207,14 @@ const Home = () => {
             <div className="pointer-events-none absolute right-[-56px] top-16 h-80 w-80 rounded-full bg-blue-300/28 blur-[140px]" />
             <div className="pointer-events-none absolute left-[42%] top-28 h-64 w-64 rounded-full bg-emerald-200/22 blur-[130px]" />
 
-            <section className="relative px-6 pt-20 md:pt-24">
-                <div className="mx-auto max-w-[1520px]">
+            <section className="relative px-6 pt-20 md:pt-24 xl:px-8">
+                <div className="mx-auto max-w-[1760px]">
                     <div className="grid items-center gap-12 xl:grid-cols-[0.82fr_1.18fr]">
                         <motion.div
                             initial={{ opacity: 0, y: 18 }}
                             animate={{ opacity: 1, y: 0 }}
                             transition={{ duration: 0.65 }}
-                            className="w-full max-w-[760px]"
+                            className="w-full max-w-[880px]"
                         >
                             <div className="inline-flex items-center gap-2 rounded-full border border-cyan-200 bg-cyan-50 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-cyan-700">
                                 <Sparkles size={14} />
@@ -199,7 +231,7 @@ const Home = () => {
 
                             <div className="mt-8 flex flex-wrap gap-4">
                                 <button
-                                    onClick={openHorizonPreviewNotice}
+                                    onClick={openHorizonAvailabilityNotice}
                                     className="group inline-flex items-center gap-2 rounded-full bg-slate-950 px-7 py-3.5 text-sm font-bold text-white transition-all hover:bg-slate-800"
                                 >
                                     Preview Horizon
@@ -315,8 +347,231 @@ const Home = () => {
                 </div>
             </section>
 
-            <section className="relative mt-12 px-6">
-                <div className="mx-auto max-w-[1520px] rounded-[32px] border border-slate-200 bg-white px-6 py-6 shadow-[0_24px_60px_-46px_rgba(15,23,42,0.25)]">
+            <section className="relative mt-12 px-6 xl:px-8">
+                <div className="relative mx-auto max-w-[1760px] overflow-hidden rounded-[34px] border border-slate-200 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(244,250,255,0.92))] p-5 shadow-[0_28px_80px_-52px_rgba(15,23,42,0.24)] md:p-6">
+                    <div className="pointer-events-none absolute left-10 top-16 h-40 w-40 rounded-full bg-cyan-200/26 blur-[90px]" />
+                    <div className="pointer-events-none absolute right-10 top-12 h-48 w-48 rounded-full bg-blue-200/22 blur-[110px]" />
+
+                    <div className="relative">
+                        <div className="grid gap-4 border-b border-slate-200/80 pb-5 lg:grid-cols-[0.92fr_1.08fr] lg:items-end">
+                            <div className="max-w-2xl">
+                                <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-cyan-700">Feedback intelligence demo</p>
+                                <h2 className="mt-3 text-2xl font-semibold leading-tight text-slate-950 md:text-4xl">
+                                    One unhappy subscriber, translated into clear action for the team.
+                                </h2>
+                                <p className="mt-3 text-sm leading-relaxed text-slate-600 md:text-base">
+                                    Horizon turns one review into structured signals your team can act on without reading every comment manually.
+                                </p>
+                            </div>
+
+                            <div className="rounded-[24px] border border-slate-200 bg-white/82 px-4 py-3 text-sm leading-relaxed text-slate-600 lg:justify-self-end lg:max-w-[720px]">
+                                Product and support teams get the theme, sentiment, urgency, problem, and impact in one compact view.
+                            </div>
+                        </div>
+
+                        <div className="relative mt-5 overflow-hidden rounded-[30px] border border-slate-200 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(241,247,255,0.94))] p-4 shadow-[0_28px_70px_-50px_rgba(15,23,42,0.2)] md:p-5">
+                            <div className="pointer-events-none absolute left-[8%] top-16 h-28 w-28 rounded-full bg-cyan-100/60 blur-3xl" />
+                            <div className="pointer-events-none absolute right-[10%] top-20 h-28 w-28 rounded-full bg-rose-100/45 blur-3xl" />
+                            <div className="pointer-events-none absolute right-[18%] bottom-8 h-32 w-32 rounded-full bg-amber-100/45 blur-3xl" />
+                            <div className="pointer-events-none absolute inset-x-12 top-[108px] hidden h-px bg-[linear-gradient(90deg,transparent,rgba(148,163,184,0.28),transparent)] lg:block" />
+
+                            <div className="relative flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                                <div className="max-w-2xl">
+                                    <div className="inline-flex items-center rounded-full border border-cyan-200 bg-cyan-50 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-cyan-700">
+                                        Simple flow
+                                    </div>
+                                    <p className="mt-2 text-sm leading-relaxed text-slate-600">
+                                        Review to sentiment to root problem, with a quick AI retention action at the end.
+                                    </p>
+                                </div>
+
+                                <div className="flex flex-wrap gap-2">
+                                    <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-medium text-slate-600">
+                                        {feedbackDemo.plan}
+                                    </span>
+                                    <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-medium text-slate-600">
+                                        {feedbackDemo.tenure}
+                                    </span>
+                                    <span className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-[11px] font-medium text-rose-700">
+                                        {feedbackDemo.renewalWindow}
+                                    </span>
+                                </div>
+                            </div>
+
+                            <div className="relative mt-6 flex flex-col gap-4 lg:flex-row lg:items-start lg:gap-0 lg:pb-6">
+                                <motion.article
+                                    initial={{ opacity: 0, y: 20 }}
+                                    whileInView={{ opacity: 1, y: 0 }}
+                                    viewport={{ once: true, margin: '-80px' }}
+                                    transition={{ duration: 0.42 }}
+                                    className="relative z-10 overflow-hidden rounded-[26px] border border-slate-200 bg-white shadow-[0_30px_80px_-54px_rgba(15,23,42,0.18)] ring-1 ring-white/80 lg:w-[38%]"
+                                >
+                                    <div className="relative flex items-center justify-between border-b border-slate-200 bg-[linear-gradient(180deg,rgba(248,250,252,0.98),rgba(241,245,249,0.96))] px-4 py-3">
+                                        <div className="flex items-center gap-2">
+                                            <span className="h-2.5 w-2.5 rounded-full bg-rose-400" />
+                                            <span className="h-2.5 w-2.5 rounded-full bg-amber-300" />
+                                            <span className="h-2.5 w-2.5 rounded-full bg-emerald-400" />
+                                        </div>
+                                        <span className="rounded-full border border-cyan-200 bg-white px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-cyan-700">
+                                            Review
+                                        </span>
+                                    </div>
+
+                                    <div className="relative space-y-4 p-5">
+                                        <div className="flex items-start justify-between gap-3">
+                                            <h3 className="max-w-[18ch] text-lg font-semibold leading-tight text-slate-950">
+                                                {feedbackDemo.summary}
+                                            </h3>
+                                            <span className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-rose-700">
+                                                Cancelled
+                                            </span>
+                                        </div>
+
+                                        <div className="flex flex-wrap gap-2">
+                                            {feedbackReviewTags.map((item) => (
+                                                <span key={item} className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[10px] font-medium text-slate-700 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)]">
+                                                    {item}
+                                                </span>
+                                            ))}
+                                        </div>
+
+                                        <div className="rounded-[20px] border border-slate-200 bg-white p-4 shadow-[0_1px_0_rgba(255,255,255,0.9)]">
+                                            <div className="flex items-start gap-3">
+                                                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-white text-cyan-700 shadow-sm ring-1 ring-slate-200">
+                                                    <MessageSquareQuote size={16} />
+                                                </div>
+                                                <div className="min-w-0">
+                                                    <div className="flex items-center gap-2">
+                                                        <p className="text-sm font-semibold text-slate-950">{feedbackDemo.author}</p>
+                                                        <span className="text-xs text-slate-400">{feedbackDemo.persona}</span>
+                                                    </div>
+                                                    <p className="mt-2 max-w-[34ch] text-[15px] leading-relaxed text-slate-700">
+                                                        "{feedbackDemo.quote}"
+                                                    </p>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </motion.article>
+
+                                <motion.article
+                                    initial={{ opacity: 0, y: 20 }}
+                                    whileInView={{ opacity: 1, y: 0 }}
+                                    viewport={{ once: true, margin: '-80px' }}
+                                    transition={{ duration: 0.42, delay: 0.07 }}
+                                    className="relative z-20 overflow-hidden rounded-[26px] border border-slate-200 bg-white shadow-[0_30px_80px_-54px_rgba(15,23,42,0.18)] ring-1 ring-white/80 lg:-ml-5 lg:mt-5 lg:w-[30%]"
+                                >
+                                    <div className="relative flex items-center justify-between border-b border-slate-200 bg-[linear-gradient(180deg,rgba(248,250,252,0.98),rgba(241,245,249,0.96))] px-4 py-3">
+                                        <div className="flex items-center gap-2">
+                                            <span className="h-2.5 w-2.5 rounded-full bg-rose-400" />
+                                            <span className="h-2.5 w-2.5 rounded-full bg-amber-300" />
+                                            <span className="h-2.5 w-2.5 rounded-full bg-emerald-400" />
+                                        </div>
+                                        <span className="rounded-full border border-rose-200 bg-white px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-rose-700">
+                                            Sentiment
+                                        </span>
+                                    </div>
+
+                                    <div className="relative space-y-4 p-5">
+                                        <div className="flex items-start justify-between gap-3">
+                                            <div>
+                                                <h3 className="text-[34px] font-semibold leading-none tracking-tight text-slate-950">Negative</h3>
+                                                <p className="mt-3 max-w-[26ch] text-sm leading-relaxed text-slate-600">
+                                                    Loyal usage is turning into churn right before renewal.
+                                                </p>
+                                            </div>
+                                            <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-amber-700">
+                                                High risk
+                                            </span>
+                                        </div>
+
+                                        <div className="grid gap-2">
+                                            {feedbackSentimentSummary.map((item) => (
+                                                <div key={item.label} className="flex items-center justify-between rounded-[16px] border border-slate-200 bg-white px-3 py-2 shadow-[0_1px_0_rgba(255,255,255,0.8)]">
+                                                    <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">{item.label}</p>
+                                                    <p
+                                                        className={`text-xs font-semibold ${
+                                                            item.tone === 'rose'
+                                                                ? 'text-rose-700'
+                                                                : item.tone === 'amber'
+                                                                    ? 'text-amber-700'
+                                                                    : 'text-cyan-700'
+                                                        }`}
+                                                    >
+                                                        {item.value}
+                                                    </p>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </motion.article>
+
+                                <motion.article
+                                    initial={{ opacity: 0, y: 20 }}
+                                    whileInView={{ opacity: 1, y: 0 }}
+                                    viewport={{ once: true, margin: '-80px' }}
+                                    transition={{ duration: 0.42, delay: 0.14 }}
+                                    className="relative z-30 overflow-hidden rounded-[26px] border border-slate-200 bg-white shadow-[0_30px_80px_-54px_rgba(15,23,42,0.18)] ring-1 ring-white/80 lg:-ml-5 lg:mt-10 lg:w-[38%]"
+                                >
+                                    <div className="relative flex items-center justify-between border-b border-slate-200 bg-[linear-gradient(180deg,rgba(248,250,252,0.98),rgba(241,245,249,0.96))] px-4 py-3">
+                                        <div className="flex items-center gap-2">
+                                            <span className="h-2.5 w-2.5 rounded-full bg-rose-400" />
+                                            <span className="h-2.5 w-2.5 rounded-full bg-amber-300" />
+                                            <span className="h-2.5 w-2.5 rounded-full bg-emerald-400" />
+                                        </div>
+                                        <span className="rounded-full border border-amber-200 bg-white px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-amber-700">
+                                            Main problem
+                                        </span>
+                                    </div>
+
+                                    <div className="relative space-y-4 p-5">
+                                        <div className="flex items-start justify-between gap-3">
+                                            <h3 className="max-w-[22ch] text-xl font-semibold leading-tight text-slate-950">
+                                                {feedbackMainProblem.title}
+                                            </h3>
+                                            <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-amber-700">
+                                                Urgent
+                                            </span>
+                                        </div>
+
+                                        <div className="grid gap-3 md:grid-cols-2">
+                                            <div className="rounded-[18px] border border-slate-200 bg-white p-3.5 shadow-[0_1px_0_rgba(255,255,255,0.8)]">
+                                                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">Problem</p>
+                                                <p className="mt-2 text-sm leading-relaxed text-slate-700">{feedbackMainProblem.problem}</p>
+                                            </div>
+                                            <div className="rounded-[18px] border border-slate-200 bg-white p-3.5 shadow-[0_1px_0_rgba(255,255,255,0.8)]">
+                                                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">Impact</p>
+                                                <p className="mt-2 text-sm leading-relaxed text-slate-700">{feedbackMainProblem.impact}</p>
+                                            </div>
+                                        </div>
+
+                                        <div className="flex items-center gap-3 rounded-[20px] border border-slate-200 bg-white px-3.5 py-3.5 shadow-[0_1px_0_rgba(255,255,255,0.9)]">
+                                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-white text-cyan-700 shadow-sm ring-1 ring-cyan-100">
+                                                <Sparkles size={16} />
+                                            </div>
+                                            <div className="min-w-0 flex-1">
+                                                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-cyan-700">Generate with AI</p>
+                                                <p className="mt-1 text-sm font-semibold text-slate-950">Retention rescue draft</p>
+                                                <p className="mt-1 text-xs leading-relaxed text-slate-600">{feedbackMainProblem.retention}</p>
+                                            </div>
+                                            <button
+                                                type="button"
+                                            onClick={openHorizonAvailabilityNotice}
+                                                className="inline-flex shrink-0 items-center justify-center rounded-full bg-slate-950 px-4 py-2 text-xs font-semibold text-white transition-colors hover:bg-slate-800"
+                                            >
+                                                Generate
+                                            </button>
+                                        </div>
+                                    </div>
+                                </motion.article>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section className="relative mt-12 px-6 xl:px-8">
+                <div className="mx-auto max-w-[1760px] rounded-[32px] border border-slate-200 bg-white px-6 py-6 shadow-[0_24px_60px_-46px_rgba(15,23,42,0.25)]">
                     <div className="grid gap-6 lg:grid-cols-[0.68fr_1.32fr] lg:items-center">
                         <div>
                             <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">Connects with the tools you already use</p>
@@ -334,17 +589,17 @@ const Home = () => {
                 </div>
             </section>
 
-            <section className="relative mt-16 px-6">
-                <div className="mx-auto max-w-[1520px]">
+            <section className="relative mt-16 px-6 xl:px-8">
+                <div className="mx-auto max-w-[1760px]">
                     <div className="grid gap-6 lg:grid-cols-[0.78fr_1.22fr] lg:items-end">
-                        <div className="w-full max-w-[760px]">
+                        <div className="w-full max-w-[880px]">
                             <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-cyan-700">What Horizon does</p>
                             <h2 className="mt-4 text-3xl font-semibold leading-tight text-slate-950 md:text-5xl">
                                 Unify feedback. Find risk. Drive action.
                             </h2>
                         </div>
 
-                        <div className="rounded-[28px] border border-slate-200 bg-slate-50 p-5 lg:ml-auto lg:max-w-[620px]">
+                        <div className="rounded-[28px] border border-slate-200 bg-slate-50 p-5 lg:ml-auto lg:max-w-[760px]">
                             <p className="text-sm leading-relaxed text-slate-600">
                                 Horizon replaces scattered feedback tools and manual synthesis with one clean operating layer for the whole company.
                             </p>
@@ -376,8 +631,8 @@ const Home = () => {
                 </div>
             </section>
 
-            <section id="how-it-works" className="relative mt-16 px-6 scroll-mt-32">
-                <div className="mx-auto grid max-w-[1520px] gap-4 lg:grid-cols-[1.06fr_0.94fr]">
+            <section id="how-it-works" className="relative mt-16 px-6 scroll-mt-32 xl:px-8">
+                <div className="mx-auto grid max-w-[1760px] gap-4 lg:grid-cols-[1.08fr_0.92fr]">
                     <div className="rounded-[34px] border border-slate-200 bg-white p-7 shadow-[0_28px_70px_-48px_rgba(15,23,42,0.24)] md:p-8">
                         <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-cyan-700">How it works</p>
                         <h2 className="mt-4 text-3xl font-semibold leading-tight text-slate-950 md:text-5xl">
@@ -399,7 +654,7 @@ const Home = () => {
 
                         <div className="mt-8 flex flex-wrap gap-4">
                             <button
-                                onClick={openHorizonPreviewNotice}
+                                onClick={openHorizonAvailabilityNotice}
                                 className="group inline-flex items-center gap-2 rounded-full bg-slate-950 px-6 py-3 text-sm font-bold text-white transition-all hover:bg-slate-800"
                             >
                                 Explore the product
@@ -451,17 +706,17 @@ const Home = () => {
                 </div>
             </section>
 
-            <section className="relative mt-16 px-6">
-                <div className="mx-auto max-w-[1520px] rounded-[34px] border border-slate-200 bg-white p-7 shadow-[0_28px_70px_-48px_rgba(15,23,42,0.24)] md:p-8">
+            <section className="relative mt-16 px-6 xl:px-8">
+                <div className="mx-auto max-w-[1760px] rounded-[34px] border border-slate-200 bg-white p-7 shadow-[0_28px_70px_-48px_rgba(15,23,42,0.24)] md:p-8">
                     <div className="grid gap-6 lg:grid-cols-[0.78fr_1.22fr] lg:items-end">
-                        <div className="w-full max-w-[760px]">
+                        <div className="w-full max-w-[880px]">
                             <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-cyan-700">Built for teams that act</p>
                             <h2 className="mt-4 text-3xl font-semibold leading-tight text-slate-950 md:text-5xl">
                                 Product, support, growth, and leadership stay aligned.
                             </h2>
                         </div>
 
-                        <div className="rounded-[28px] border border-slate-200 bg-slate-50 p-5 lg:ml-auto lg:max-w-[620px]">
+                        <div className="rounded-[28px] border border-slate-200 bg-slate-50 p-5 lg:ml-auto lg:max-w-[760px]">
                             <p className="text-sm leading-relaxed text-slate-600">
                                 Different teams use the same signal differently, but Horizon makes sure everyone starts from the same customer truth.
                             </p>

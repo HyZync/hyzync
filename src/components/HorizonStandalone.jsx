@@ -563,10 +563,16 @@ const HorizonStandalone = () => {
         isDarkMode ? 'horizon-theme-dark' : '',
     ].filter(Boolean).join(' ');
     const appView = session.mode === 'locked' ? (
-        <HorizonAccessPortal
-            onAuthenticated={handleAuthenticated}
-            onPreview={handlePreview}
-        />
+        <>
+            <HorizonAccessPortal
+                onAuthenticated={handleAuthenticated}
+                onPreview={handlePreview}
+            />
+            <ThemeModeToggle
+                isDarkMode={isDarkMode}
+                onToggle={handleToggleThemeMode}
+            />
+        </>
     ) : (
         <GlobalErrorBoundary>
             <HorizonDashboard
@@ -574,6 +580,8 @@ const HorizonStandalone = () => {
                 onLogout={handleLogout}
                 isPreviewMode={session.mode === 'preview'}
                 onUserUpdated={handleUserUpdated}
+                isDarkMode={isDarkMode}
+                onToggleThemeMode={handleToggleThemeMode}
             />
         </GlobalErrorBoundary>
     );
@@ -581,15 +589,11 @@ const HorizonStandalone = () => {
     return (
         <div className={horizonRootClass}>
             {appView}
-            <ThemeModeToggle
-                isDarkMode={isDarkMode}
-                onToggle={handleToggleThemeMode}
-            />
         </div>
     );
 };
 
-const HorizonDashboard = ({ user, onLogout, isPreviewMode = false, onUserUpdated }) => {
+const HorizonDashboard = ({ user, onLogout, isPreviewMode = false, onUserUpdated, isDarkMode, onToggleThemeMode }) => {
     const navigate = useNavigate();
     const [activeTab, setActiveTab] = useState('workspaces');
     const [showCreateForm, setShowCreateForm] = useState(false);
@@ -850,16 +854,25 @@ const HorizonDashboard = ({ user, onLogout, isPreviewMode = false, onUserUpdated
             {/* Sidebar */}
             <div className="w-[272px] bg-white border-r border-slate-200/80 flex flex-col z-20 relative shrink-0">
                 {/* Logo Area */}
-                <div className="px-5 py-5 border-b border-slate-100 flex items-center justify-between">
-                    <div className="flex items-center gap-2.5 cursor-pointer group" onClick={() => navigate('/')}>
-                        <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-indigo-600 to-violet-600 flex items-center justify-center shadow-lg shadow-indigo-600/25 group-hover:shadow-indigo-600/40 transition-shadow">
-                            <Zap size={15} className="text-white" />
+                <div className="px-5 py-5 border-b border-slate-100">
+                    <button
+                        type="button"
+                        onClick={() => navigate('/')}
+                        className="group flex w-full items-center justify-between gap-4 rounded-[22px] border border-slate-200/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.95),rgba(243,248,255,0.9))] px-4 py-3.5 text-left shadow-[0_18px_34px_-28px_rgba(15,23,42,0.2)] transition-all duration-300 hover:-translate-y-0.5 hover:border-cyan-200/80 hover:shadow-[0_22px_44px_-28px_rgba(14,116,144,0.26)]"
+                    >
+                        <div className="min-w-0 flex-1">
+                            <span className="block text-[19px] font-semibold tracking-[-0.04em] text-slate-950 leading-none">
+                                Horizon
+                            </span>
+                            <span className="mt-1.5 block text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-400">
+                                Feedback Intelligence
+                            </span>
                         </div>
-                        <div className="flex flex-col">
-                            <span className="font-bold text-[15px] tracking-tight text-slate-900 leading-none">Horizon</span>
-                            <span className="text-[9px] text-slate-400 font-medium tracking-wider uppercase">Intelligence</span>
+
+                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white/90 text-slate-400 transition-colors duration-300 group-hover:border-cyan-200 group-hover:text-cyan-700">
+                            <ArrowLeft size={14} />
                         </div>
-                    </div>
+                    </button>
                 </div>
 
                 {/* Main Navigation */}
@@ -915,6 +928,13 @@ const HorizonDashboard = ({ user, onLogout, isPreviewMode = false, onUserUpdated
                         <HelpCircle size={15} className="text-slate-400" />
                         Help & Support
                     </button>
+                    <div className="pt-2">
+                        <ThemeModeToggle
+                            isDarkMode={isDarkMode}
+                            onToggle={onToggleThemeMode}
+                            inline
+                        />
+                    </div>
                     <div className="h-px bg-slate-100 my-1.5"></div>
                     <div className="px-3 py-2 flex items-center justify-between">
                         <div className="flex items-center gap-2.5">
@@ -3550,17 +3570,24 @@ const CopilotAnchor = () => {
     );
 };
 
-const ThemeModeToggle = ({ isDarkMode, onToggle }) => {
+const ThemeModeToggle = ({ isDarkMode, onToggle, inline = false }) => {
     return (
         <button
             type="button"
             onClick={onToggle}
-            className="horizon-theme-static fixed right-4 top-4 z-[140] inline-flex items-center gap-2 rounded-xl border border-slate-300/80 bg-white/90 px-3 py-2 text-xs font-semibold text-slate-700 shadow-lg backdrop-blur transition-all hover:border-slate-400 hover:bg-white"
+            className={`horizon-theme-static inline-flex items-center gap-2 border border-slate-300/80 bg-white/90 text-xs font-semibold text-slate-700 shadow-lg backdrop-blur transition-all hover:border-slate-400 hover:bg-white ${
+                inline
+                    ? 'w-full justify-between rounded-xl px-3 py-2.5'
+                    : 'fixed bottom-4 right-4 z-[140] rounded-xl px-3 py-2'
+            }`}
             title={isDarkMode ? 'Switch to light mode' : 'Switch to dark mode'}
             aria-label={isDarkMode ? 'Switch to light mode' : 'Switch to dark mode'}
         >
-            {isDarkMode ? <Sun size={14} /> : <Moon size={14} />}
-            <span>{isDarkMode ? 'Light Mode' : 'Dark Mode'}</span>
+            <span className="inline-flex items-center gap-2">
+                {isDarkMode ? <Sun size={14} /> : <Moon size={14} />}
+                <span>{isDarkMode ? 'Light Mode' : 'Dark Mode'}</span>
+            </span>
+            {inline && <span className="text-[10px] uppercase tracking-[0.18em] text-slate-400">Appearance</span>}
         </button>
     );
 };

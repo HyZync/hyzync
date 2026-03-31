@@ -2,7 +2,7 @@ import React from 'react';
 import logo from '../assets/logo.png';
 import { Linkedin } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { useHorizonPreviewNotice } from './HorizonPreviewNoticeProvider';
+import { useHorizonAvailabilityNotice } from './HorizonAvailabilityNoticeProvider';
 
 // Custom X (Twitter) Icon
 const XIcon = ({ size = 16, className = '' }) => (
@@ -14,16 +14,8 @@ const XIcon = ({ size = 16, className = '' }) => (
 const Footer = () => {
     const navigate = useNavigate();
     const location = useLocation();
-    const { openHorizonPreviewNotice } = useHorizonPreviewNotice();
+    const { openHorizonAvailabilityNotice } = useHorizonAvailabilityNotice();
     const isHomeRoute = location.pathname === '/';
-
-    const handleHorizonPreviewClick = (event) => {
-        if (event) {
-            event.preventDefault();
-        }
-
-        openHorizonPreviewNotice();
-    };
 
     if (isHomeRoute) {
         return (
@@ -37,7 +29,7 @@ const Footer = () => {
                             </p>
                             <div className="mt-5 flex flex-wrap gap-3">
                                 <button
-                                    onClick={handleHorizonPreviewClick}
+                                    onClick={openHorizonAvailabilityNotice}
                                     className="rounded-full bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-slate-800"
                                 >
                                     Open Horizon
@@ -55,7 +47,7 @@ const Footer = () => {
                             <div>
                                 <h4 className="text-sm font-semibold text-slate-900">Platform</h4>
                                 <ul className="mt-3 space-y-2 text-sm">
-                                    <li><Link to="/horizon" onClick={handleHorizonPreviewClick} className="text-slate-600 hover:text-slate-900 transition-colors">Horizon App</Link></li>
+                                    <li><button type="button" onClick={openHorizonAvailabilityNotice} className="bg-transparent p-0 text-left text-slate-600 transition-colors hover:text-slate-900">Horizon App</button></li>
                                     <li><Link to="/#how-it-works" className="text-slate-600 hover:text-slate-900 transition-colors">How It Works</Link></li>
                                     <li><Link to="/academy" className="text-slate-600 hover:text-slate-900 transition-colors">Academy</Link></li>
                                     <li><Link to="/#contact" className="text-slate-600 hover:text-slate-900 transition-colors">Contact</Link></li>
@@ -101,7 +93,7 @@ const Footer = () => {
                         <h4 className="text-sm font-semibold mb-3 text-white">Platform</h4>
                         <ul className="space-y-2 text-sm">
                             <li><Link to="/#how-it-works" className="text-secondary hover:text-brand-purple transition-colors">Workflow</Link></li>
-                            <li><Link to="/horizon" onClick={handleHorizonPreviewClick} className="text-secondary hover:text-brand-purple transition-colors">Horizon App</Link></li>
+                            <li><button type="button" onClick={openHorizonAvailabilityNotice} className="bg-transparent p-0 text-left text-secondary transition-colors hover:text-brand-purple">Horizon App</button></li>
                             <li><Link to="/academy" className="text-secondary hover:text-brand-purple transition-colors">Academy</Link></li>
                             <li><Link to="/#contact" className="text-secondary hover:text-brand-purple transition-colors">Contact</Link></li>
                         </ul>

@@ -1,4 +1,4 @@
-import { BrowserRouter as Router, Routes, Route, useLocation } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, useLocation, useNavigate } from 'react-router-dom';
 import Navbar from './components/Navbar';
 import Home from './components/Home';
 import About from './components/About';
@@ -11,7 +11,7 @@ import Footer from './components/Footer';
 import Background from './components/Background';
 import Particles from './components/Particles';
 import MouseSpotlight from './components/MouseSpotlight';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import PromoBanner from './components/PromoBanner';
 import YearProgress from './components/YearProgress';
 import IQ from './components/IQ';
@@ -19,8 +19,59 @@ import Founder from './components/Founder';
 import ScrollToTop from './components/ScrollToTop';
 
 import AdvancedScrollManager from './components/ScrollManager';
-import HorizonStandalone from './components/HorizonStandalone';
-import { HorizonPreviewNoticeProvider } from './components/HorizonPreviewNoticeProvider';
+import { HorizonAvailabilityNoticeProvider, useHorizonAvailabilityNotice } from './components/HorizonAvailabilityNoticeProvider';
+
+const DESKTOP_MIN_WIDTH = 1024;
+
+const DesktopOnlyFallback = () => (
+  <div className="relative min-h-screen overflow-hidden bg-[radial-gradient(circle_at_12%_12%,rgba(34,211,238,0.2),transparent_24%),radial-gradient(circle_at_86%_14%,rgba(59,130,246,0.16),transparent_28%),linear-gradient(180deg,#f8fbfe_0%,#eef5fb_100%)] px-5 py-8 text-slate-900">
+    <div className="pointer-events-none absolute -left-16 top-10 h-72 w-72 rounded-full bg-cyan-300/28 blur-[120px]" />
+    <div className="pointer-events-none absolute right-[-72px] top-16 h-80 w-80 rounded-full bg-blue-300/24 blur-[140px]" />
+
+    <div className="relative mx-auto flex min-h-[calc(100vh-4rem)] max-w-xl items-center justify-center">
+      <div className="w-full overflow-hidden rounded-[34px] border border-white/80 bg-white shadow-[0_32px_90px_-44px_rgba(15,23,42,0.18)] ring-1 ring-slate-100/80 backdrop-blur-[24px]">
+        <div className="flex items-center justify-between border-b border-slate-200 bg-[linear-gradient(180deg,#f8fafc_0%,#eef2f7_100%)] px-5 py-3">
+          <div className="flex items-center gap-2">
+            <span className="h-2.5 w-2.5 rounded-full bg-rose-400" />
+            <span className="h-2.5 w-2.5 rounded-full bg-amber-300" />
+            <span className="h-2.5 w-2.5 rounded-full bg-emerald-400" />
+          </div>
+          <div className="rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-600">
+            Horizon FI
+          </div>
+        </div>
+
+        <div className="px-7 py-8 text-center">
+          <div className="mx-auto inline-flex items-center rounded-full border border-cyan-200 bg-cyan-50 px-4 py-2 text-sm font-semibold text-cyan-800 shadow-[inset_0_1px_0_rgba(255,255,255,0.9)]">
+            Horizon FI
+          </div>
+          <p className="mt-5 text-[11px] font-semibold uppercase tracking-[0.24em] text-cyan-700">
+            Desktop Experience
+          </p>
+          <h1 className="mt-3 text-3xl font-semibold leading-tight text-slate-950 sm:text-[42px]">
+            Horizon FI is available on desktop screens only.
+          </h1>
+          <p className="mx-auto mt-4 max-w-[26rem] text-[15px] leading-relaxed text-slate-600 sm:text-base">
+            Please visit on a desktop or laptop to continue.
+          </p>
+
+          <div className="mt-7 rounded-[22px] border border-slate-200 bg-slate-50 px-4 py-4 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.8)]">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+              Recommended Width
+            </p>
+            <p className="mt-2 text-lg font-semibold text-slate-950">
+              1024px or wider
+            </p>
+          </div>
+
+          <div className="mt-6 rounded-[22px] border border-slate-200 bg-[linear-gradient(180deg,rgba(248,250,252,0.95),rgba(255,255,255,0.98))] px-4 py-3 text-sm leading-relaxed text-slate-600">
+            Thanks for visiting. Have a great day.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+);
 
 const MainLayout = ({ children }) => {
   const location = useLocation();
@@ -59,17 +110,51 @@ const MainLayout = ({ children }) => {
 function App() {
   return (
     <Router>
-      <HorizonPreviewNoticeProvider>
+      <HorizonAvailabilityNoticeProvider>
         <AppShell />
-      </HorizonPreviewNoticeProvider>
+      </HorizonAvailabilityNoticeProvider>
     </Router>
   );
 }
+
+const HorizonAvailabilityRedirect = () => {
+  const navigate = useNavigate();
+  const { openHorizonAvailabilityNotice } = useHorizonAvailabilityNotice();
+
+  useEffect(() => {
+    openHorizonAvailabilityNotice();
+    navigate('/', { replace: true });
+  }, [navigate]);
+
+  return null;
+};
 
 function AppShell() {
   const location = useLocation();
   const isHorizonRoute = location.pathname.startsWith('/horizon');
   const isHomeRoute = location.pathname === '/';
+  const [isDesktopViewport, setIsDesktopViewport] = useState(() => {
+    if (typeof window === 'undefined') {
+      return true;
+    }
+
+    return window.innerWidth >= DESKTOP_MIN_WIDTH;
+  });
+
+  useEffect(() => {
+    const updateViewportState = () => {
+      setIsDesktopViewport(window.innerWidth >= DESKTOP_MIN_WIDTH);
+    };
+
+    updateViewportState();
+    window.addEventListener('resize', updateViewportState);
+
+    return () => window.removeEventListener('resize', updateViewportState);
+  }, []);
+
+  if (!isDesktopViewport) {
+    return <DesktopOnlyFallback />;
+  }
 
   return (
     <>
@@ -78,7 +163,7 @@ function AppShell() {
       <ScrollToTop />
       <AdvancedScrollManager />
       <Routes>
-        <Route path="/horizon" element={<HorizonStandalone />} />
+        <Route path="/horizon/*" element={<HorizonAvailabilityRedirect />} />
         <Route path="*" element={
           <MainLayout>
             <Routes>
