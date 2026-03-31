@@ -524,15 +524,20 @@ const Home = () => {
                                 </div>
                             </div>
 
-                            <div className="relative mt-6 flex flex-col gap-4 lg:mx-auto lg:w-[94%] lg:flex-row lg:items-start lg:justify-center lg:gap-4 lg:pt-2 lg:pb-8 xl:w-[90%] xl:gap-5 xl:pb-10 lg:[perspective:2200px] lg:[transform-style:preserve-3d]">
+                            <div className="relative mt-6">
+                                <div className="pointer-events-none absolute inset-x-[14%] top-10 hidden h-px bg-[linear-gradient(90deg,transparent,rgba(148,163,184,0.3),transparent)] lg:block" />
+
+                                <div className="relative grid gap-4 lg:grid-cols-[1.02fr_0.86fr_1.12fr] lg:items-stretch">
                                 <motion.article
                                     initial={{ opacity: 0, y: 20 }}
                                     whileInView={{ opacity: 1, y: 0 }}
                                     viewport={{ once: true, margin: '-80px' }}
                                     transition={{ duration: 0.42 }}
-                                    className="relative z-10 overflow-hidden rounded-[26px] border border-slate-200 bg-white shadow-[0_30px_80px_-54px_rgba(15,23,42,0.18)] ring-1 ring-white/80 after:pointer-events-none after:absolute after:inset-0 after:bg-[linear-gradient(135deg,rgba(255,255,255,0.44),transparent_34%,transparent_70%,rgba(14,165,233,0.05))] after:content-[''] lg:w-[33%] lg:max-w-[500px] lg:flex-none lg:origin-bottom-right lg:[transform-style:preserve-3d] lg:[transform:translate3d(0,0,0)_rotateX(4deg)_rotateY(6deg)] lg:shadow-[0_54px_90px_-56px_rgba(15,23,42,0.36)] xl:w-[32%] xl:max-w-[520px]"
+                                    className="relative flex h-full flex-col overflow-hidden rounded-[28px] border border-slate-200/90 bg-[linear-gradient(180deg,rgba(255,255,255,0.99),rgba(246,250,253,0.96))] shadow-[0_28px_72px_-50px_rgba(15,23,42,0.22)] ring-1 ring-white/80"
                                 >
-                                    <div className="relative z-10 flex items-center justify-between border-b border-slate-200 bg-[linear-gradient(180deg,rgba(248,250,252,0.98),rgba(241,245,249,0.96))] px-4 py-3 lg:[transform:translateZ(24px)]">
+                                    <div className="absolute inset-x-0 top-0 h-[3px] bg-gradient-to-r from-cyan-300 via-sky-400 to-cyan-500" />
+
+                                    <div className="relative flex items-center justify-between border-b border-slate-200 bg-[linear-gradient(180deg,rgba(248,250,252,0.98),rgba(241,245,249,0.96))] px-5 py-3.5">
                                         <div className="flex items-center gap-2">
                                             <span className="h-2.5 w-2.5 rounded-full bg-rose-400" />
                                             <span className="h-2.5 w-2.5 rounded-full bg-amber-300" />
@@ -543,7 +548,7 @@ const Home = () => {
                                         </span>
                                     </div>
 
-                                    <div className="relative z-10 space-y-4 p-5 lg:[transform:translateZ(34px)]">
+                                    <div className="relative flex flex-1 flex-col gap-5 p-6">
                                         <div className="flex items-start justify-between gap-3">
                                             <h3 className="max-w-[18ch] text-lg font-semibold leading-tight text-slate-950">
                                                 {feedbackDemo.summary}
@@ -561,9 +566,9 @@ const Home = () => {
                                             ))}
                                         </div>
 
-                                        <div className="rounded-[20px] border border-slate-200 bg-white p-4 shadow-[0_1px_0_rgba(255,255,255,0.9)]">
+                                        <div className="mt-auto rounded-[22px] border border-slate-200 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(248,250,252,0.95))] p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.9)]">
                                             <div className="flex items-start gap-3">
-                                                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-white text-cyan-700 shadow-sm ring-1 ring-slate-200">
+                                                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-white text-cyan-700 shadow-sm ring-1 ring-slate-200">
                                                     <MessageSquareQuote size={16} />
                                                 </div>
                                                 <div className="min-w-0">
@@ -571,7 +576,7 @@ const Home = () => {
                                                         <p className="text-sm font-semibold text-slate-950">{feedbackDemo.author}</p>
                                                         <span className="text-xs text-slate-400">{feedbackDemo.persona}</span>
                                                     </div>
-                                                    <p className="mt-2 max-w-[34ch] text-[15px] leading-relaxed text-slate-700">
+                                                    <p className="mt-3 max-w-[34ch] text-[15px] leading-relaxed text-slate-700">
                                                         "{feedbackDemo.quote}"
                                                     </p>
                                                 </div>
@@ -585,9 +590,11 @@ const Home = () => {
                                     whileInView={{ opacity: 1, y: 0 }}
                                     viewport={{ once: true, margin: '-80px' }}
                                     transition={{ duration: 0.42, delay: 0.07 }}
-                                    className="relative z-20 overflow-hidden rounded-[26px] border border-slate-200 bg-white shadow-[0_30px_80px_-54px_rgba(15,23,42,0.18)] ring-1 ring-white/80 after:pointer-events-none after:absolute after:inset-0 after:bg-[linear-gradient(145deg,rgba(255,255,255,0.42),transparent_36%,transparent_68%,rgba(248,113,113,0.05))] after:content-[''] lg:w-[25%] lg:max-w-[390px] lg:flex-none lg:origin-bottom-center lg:[transform-style:preserve-3d] lg:[transform:translate3d(0,22px,14px)_rotateX(4deg)_rotateY(0deg)] lg:shadow-[0_58px_92px_-56px_rgba(15,23,42,0.38)] xl:w-[24%] xl:max-w-[410px]"
+                                    className="relative flex h-full flex-col overflow-hidden rounded-[28px] border border-slate-200/90 bg-[linear-gradient(180deg,rgba(255,255,255,0.99),rgba(248,249,252,0.96))] shadow-[0_28px_72px_-50px_rgba(15,23,42,0.2)] ring-1 ring-white/80"
                                 >
-                                    <div className="relative z-10 flex items-center justify-between border-b border-slate-200 bg-[linear-gradient(180deg,rgba(248,250,252,0.98),rgba(241,245,249,0.96))] px-4 py-3 lg:[transform:translateZ(24px)]">
+                                    <div className="absolute inset-x-0 top-0 h-[3px] bg-gradient-to-r from-rose-300 via-rose-400 to-amber-300" />
+
+                                    <div className="relative flex items-center justify-between border-b border-slate-200 bg-[linear-gradient(180deg,rgba(248,250,252,0.98),rgba(241,245,249,0.96))] px-5 py-3.5">
                                         <div className="flex items-center gap-2">
                                             <span className="h-2.5 w-2.5 rounded-full bg-rose-400" />
                                             <span className="h-2.5 w-2.5 rounded-full bg-amber-300" />
@@ -598,11 +605,11 @@ const Home = () => {
                                         </span>
                                     </div>
 
-                                    <div className="relative z-10 space-y-4 p-5 lg:[transform:translateZ(36px)]">
+                                    <div className="relative flex flex-1 flex-col gap-5 p-6">
                                         <div className="flex items-start justify-between gap-3">
                                             <div>
-                                                <h3 className="text-[34px] font-semibold leading-none tracking-tight text-slate-950">Negative</h3>
-                                                <p className="mt-3 max-w-[26ch] text-sm leading-relaxed text-slate-600">
+                                                <h3 className="text-[30px] font-semibold leading-none tracking-tight text-slate-950 sm:text-[34px]">Negative</h3>
+                                                <p className="mt-4 max-w-[26ch] text-sm leading-relaxed text-slate-600">
                                                     Loyal usage is turning into churn right before renewal.
                                                 </p>
                                             </div>
@@ -611,9 +618,9 @@ const Home = () => {
                                             </span>
                                         </div>
 
-                                        <div className="grid gap-2">
+                                        <div className="mt-auto grid gap-2.5">
                                             {feedbackSentimentSummary.map((item) => (
-                                                <div key={item.label} className="flex items-center justify-between rounded-[16px] border border-slate-200 bg-white px-3 py-2 shadow-[0_1px_0_rgba(255,255,255,0.8)]">
+                                                <div key={item.label} className="flex items-center justify-between rounded-[18px] border border-slate-200 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(248,250,252,0.94))] px-4 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.85)]">
                                                     <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">{item.label}</p>
                                                     <p
                                                         className={`text-xs font-semibold ${
@@ -637,9 +644,11 @@ const Home = () => {
                                     whileInView={{ opacity: 1, y: 0 }}
                                     viewport={{ once: true, margin: '-80px' }}
                                     transition={{ duration: 0.42, delay: 0.14 }}
-                                    className="relative z-30 overflow-hidden rounded-[26px] border border-slate-200 bg-white shadow-[0_30px_80px_-54px_rgba(15,23,42,0.18)] ring-1 ring-white/80 after:pointer-events-none after:absolute after:inset-0 after:bg-[linear-gradient(145deg,rgba(255,255,255,0.42),transparent_34%,transparent_70%,rgba(251,191,36,0.06))] after:content-[''] lg:w-[33%] lg:max-w-[520px] lg:flex-none lg:origin-bottom-left lg:[transform-style:preserve-3d] lg:[transform:translate3d(0,42px,22px)_rotateX(4deg)_rotateY(-6deg)] lg:shadow-[0_66px_98px_-56px_rgba(15,23,42,0.42)] xl:w-[32%] xl:max-w-[540px]"
+                                    className="relative flex h-full flex-col overflow-hidden rounded-[28px] border border-slate-200/90 bg-[linear-gradient(180deg,rgba(255,255,255,0.99),rgba(251,249,244,0.92))] shadow-[0_28px_78px_-52px_rgba(15,23,42,0.22)] ring-1 ring-white/80"
                                 >
-                                    <div className="relative z-10 flex items-center justify-between border-b border-slate-200 bg-[linear-gradient(180deg,rgba(248,250,252,0.98),rgba(241,245,249,0.96))] px-4 py-3 lg:[transform:translateZ(24px)]">
+                                    <div className="absolute inset-x-0 top-0 h-[3px] bg-gradient-to-r from-amber-300 via-amber-400 to-orange-300" />
+
+                                    <div className="relative flex items-center justify-between border-b border-slate-200 bg-[linear-gradient(180deg,rgba(248,250,252,0.98),rgba(241,245,249,0.96))] px-5 py-3.5">
                                         <div className="flex items-center gap-2">
                                             <span className="h-2.5 w-2.5 rounded-full bg-rose-400" />
                                             <span className="h-2.5 w-2.5 rounded-full bg-amber-300" />
@@ -650,7 +659,7 @@ const Home = () => {
                                         </span>
                                     </div>
 
-                                    <div className="relative z-10 space-y-4 p-5 lg:[transform:translateZ(38px)]">
+                                    <div className="relative flex flex-1 flex-col gap-5 p-6">
                                         <div className="flex items-start justify-between gap-3">
                                             <h3 className="max-w-[22ch] text-xl font-semibold leading-tight text-slate-950">
                                                 {feedbackMainProblem.title}
@@ -661,24 +670,25 @@ const Home = () => {
                                         </div>
 
                                         <div className="grid gap-3 xl:grid-cols-2">
-                                            <div className="rounded-[18px] border border-slate-200 bg-white p-3.5 shadow-[0_1px_0_rgba(255,255,255,0.8)]">
+                                            <div className="rounded-[20px] border border-slate-200 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(249,250,252,0.95))] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)]">
                                                 <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">Problem</p>
                                                 <p className="mt-2 text-sm leading-relaxed text-slate-700">{feedbackMainProblem.problem}</p>
                                             </div>
-                                            <div className="rounded-[18px] border border-slate-200 bg-white p-3.5 shadow-[0_1px_0_rgba(255,255,255,0.8)]">
+                                            <div className="rounded-[20px] border border-slate-200 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(249,250,252,0.95))] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)]">
                                                 <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">Impact</p>
                                                 <p className="mt-2 text-sm leading-relaxed text-slate-700">{feedbackMainProblem.impact}</p>
                                             </div>
                                         </div>
 
-                                        <div className="flex flex-col items-start gap-3 rounded-[20px] border border-slate-200 bg-white px-3.5 py-3.5 shadow-[0_1px_0_rgba(255,255,255,0.9)] sm:flex-row sm:items-center">
-                                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-white text-cyan-700 shadow-sm ring-1 ring-cyan-100">
+                                        <div className="mt-auto rounded-[24px] border border-cyan-100 bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(236,250,255,0.88))] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.9)]">
+                                            <div className="flex flex-col items-start gap-4 sm:flex-row sm:items-center">
+                                            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-white text-cyan-700 shadow-sm ring-1 ring-cyan-100">
                                                 <Sparkles size={16} />
                                             </div>
                                             <div className="min-w-0 flex-1">
                                                 <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-cyan-700">Generate with AI</p>
                                                 <p className="mt-1 text-sm font-semibold text-slate-950">Retention rescue draft</p>
-                                                <p className="mt-1 text-xs leading-relaxed text-slate-600">{feedbackMainProblem.retention}</p>
+                                                <p className="mt-2 text-xs leading-relaxed text-slate-600">{feedbackMainProblem.retention}</p>
                                             </div>
                                             <button
                                                 type="button"
@@ -688,9 +698,11 @@ const Home = () => {
                                                 {isHorizonLocked && <Lock size={13} className="mr-1.5" />}
                                                 Generate
                                             </button>
+                                            </div>
                                         </div>
                                     </div>
                                 </motion.article>
+                                </div>
                             </div>
                         </div>
                     </div>
