@@ -270,6 +270,10 @@ const Home = () => {
                                 Horizon unifies reviews, tickets, CRM notes, and survey feedback so your team can spot churn risk, prioritize issues, and act faster.
                             </p>
 
+                            <p className="mt-4 max-w-2xl text-base leading-relaxed text-slate-500 md:text-lg">
+                                Built for subscription brands, it gives product, support, and growth teams one clear operating view without the reporting overhead.
+                            </p>
+
                             <div className="mt-8 flex flex-wrap gap-4">
                                 <button
                                     onClick={openHorizonAvailabilityNotice}
@@ -740,7 +744,7 @@ const Home = () => {
 
                         <div className="rounded-[28px] border border-slate-200 bg-slate-50 p-5 lg:ml-auto lg:max-w-[760px]">
                             <p className="text-sm leading-relaxed text-slate-600">
-                                Horizon replaces scattered feedback tools and manual synthesis with one clean operating layer for the whole company.
+                                For subscription brands, Horizon is the world&apos;s simplest platform to unify customer feedback with easy integrations, quick analysis, and actionable reports powered by agentic AI.
                             </p>
                         </div>
                     </div>
