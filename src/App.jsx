@@ -1,4 +1,4 @@
-import { BrowserRouter as Router, Routes, Route, useLocation, useNavigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, useLocation } from 'react-router-dom';
 import Navbar from './components/Navbar';
 import Home from './components/Home';
 import About from './components/About';
@@ -17,9 +17,10 @@ import YearProgress from './components/YearProgress';
 import IQ from './components/IQ';
 import Founder from './components/Founder';
 import ScrollToTop from './components/ScrollToTop';
+import HorizonStandalone from './components/HorizonStandalone';
 
 import AdvancedScrollManager from './components/ScrollManager';
-import { HorizonAvailabilityNoticeProvider, useHorizonAvailabilityNotice } from './components/HorizonAvailabilityNoticeProvider';
+import { HorizonAvailabilityNoticeProvider } from './components/HorizonAvailabilityNoticeProvider';
 
 const DESKTOP_MIN_WIDTH = 1024;
 
@@ -117,18 +118,6 @@ function App() {
   );
 }
 
-const HorizonAvailabilityRedirect = () => {
-  const navigate = useNavigate();
-  const { openHorizonAvailabilityNotice } = useHorizonAvailabilityNotice();
-
-  useEffect(() => {
-    openHorizonAvailabilityNotice();
-    navigate('/', { replace: true });
-  }, [navigate]);
-
-  return null;
-};
-
 function AppShell() {
   const location = useLocation();
   const isHorizonRoute = location.pathname.startsWith('/horizon');
@@ -163,7 +152,7 @@ function AppShell() {
       <ScrollToTop />
       <AdvancedScrollManager />
       <Routes>
-        <Route path="/horizon/*" element={<HorizonAvailabilityRedirect />} />
+        <Route path="/horizon/*" element={<HorizonStandalone />} />
         <Route path="*" element={
           <MainLayout>
             <Routes>

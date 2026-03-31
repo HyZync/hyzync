@@ -7,6 +7,7 @@ import {
     CheckCircle2,
     FileSpreadsheet,
     Layers,
+    Lock,
     MessageSquareQuote,
     ShieldAlert,
     Sparkles,
@@ -121,11 +122,51 @@ const coreCards = [
     }
 ];
 
+const summaryToneStyles = {
+    cyan: {
+        icon: 'bg-cyan-100 text-cyan-700',
+        badge: 'border-cyan-200 bg-cyan-50/90 text-cyan-700',
+        glow: 'from-cyan-300/25 via-cyan-100/0 to-transparent'
+    },
+    amber: {
+        icon: 'bg-amber-100 text-amber-700',
+        badge: 'border-amber-200 bg-amber-50/90 text-amber-700',
+        glow: 'from-amber-300/30 via-amber-100/0 to-transparent'
+    },
+    emerald: {
+        icon: 'bg-emerald-100 text-emerald-700',
+        badge: 'border-emerald-200 bg-emerald-50/90 text-emerald-700',
+        glow: 'from-emerald-300/25 via-emerald-100/0 to-transparent'
+    }
+};
+
 const summaryCards = [
-    ['Unified signals', 'Reviews, support, CRM, surveys, and uploads'],
-    ['Top issue', 'Onboarding friction increasing across channels'],
-    ['Next output', 'One action brief for every team']
+    {
+        label: 'Unified signals',
+        value: 'Reviews, support, CRM, surveys, and uploads',
+        meta: '8 live feeds',
+        tone: 'cyan',
+        icon: Layers
+    },
+    {
+        label: 'Top issue',
+        value: 'Onboarding friction increasing across channels',
+        meta: 'Escalating',
+        tone: 'amber',
+        icon: ShieldAlert
+    },
+    {
+        label: 'Next output',
+        value: 'One action brief for every team',
+        meta: 'Auto-routed',
+        tone: 'emerald',
+        icon: Workflow
+    }
 ];
+
+const previewSignalPills = ['Reviews', 'Support', 'CRM'];
+
+const riskTrendTags = ['Onboarding', 'Billing', 'Support lag'];
 
 const steps = [
     {
@@ -187,7 +228,7 @@ const bars = [24, 36, 48, 44, 61, 74, 66, 84];
 
 const Home = () => {
     const navigate = useNavigate();
-    const { openHorizonAvailabilityNotice } = useHorizonAvailabilityNotice();
+    const { openHorizonAvailabilityNotice, isHorizonLocked } = useHorizonAvailabilityNotice();
     const [activeLogoIndex, setActiveLogoIndex] = useState(0);
 
     useEffect(() => {
@@ -234,6 +275,7 @@ const Home = () => {
                                     onClick={openHorizonAvailabilityNotice}
                                     className="group inline-flex items-center gap-2 rounded-full bg-slate-950 px-7 py-3.5 text-sm font-bold text-white transition-all hover:bg-slate-800"
                                 >
+                                    {isHorizonLocked && <Lock size={15} />}
                                     Preview Horizon
                                     <ArrowRight size={16} className="transition-transform group-hover:translate-x-1" />
                                 </button>
@@ -284,58 +326,142 @@ const Home = () => {
 
                                 <div className="mt-4 grid gap-4 lg:grid-cols-[1.08fr_0.92fr]">
                                     <div className="rounded-[28px] border border-slate-200 bg-slate-50 p-3">
-                                        <div className={`relative flex min-h-[360px] items-center justify-center overflow-hidden rounded-[22px] border border-slate-200 bg-gradient-to-br ${activePreviewLogo.gradient} p-6 shadow-[0_16px_40px_-30px_rgba(15,23,42,0.28)]`}>
-                                            <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.65),transparent_42%)]" />
+                                        <div className={`relative overflow-hidden rounded-[22px] border border-slate-200 bg-gradient-to-br ${activePreviewLogo.gradient} p-5 shadow-[0_18px_42px_-30px_rgba(15,23,42,0.28)] sm:p-6`}>
+                                            <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.66),transparent_42%)]" />
+                                            <div className="absolute inset-0 flex items-center justify-center">
+                                                <div className="h-[220px] w-[220px] rounded-full border border-white/45 bg-white/8 sm:h-[250px] sm:w-[250px]" />
+                                                <div className="absolute h-[300px] w-[300px] rounded-full border border-white/28 sm:h-[340px] sm:w-[340px]" />
+                                                <div className="absolute h-[380px] w-[380px] rounded-full border border-white/18 sm:h-[430px] sm:w-[430px]" />
+                                            </div>
                                             <div className="absolute -top-8 right-1 h-40 w-40 rounded-full bg-white/35 blur-3xl" />
                                             <div className="absolute -bottom-10 left-2 h-40 w-40 rounded-full bg-cyan-200/28 blur-3xl" />
-                                            <div className="absolute inset-x-8 bottom-8 h-24 rounded-full bg-white/32 blur-3xl" />
+                                            <div className="absolute inset-x-10 bottom-8 h-20 rounded-full bg-white/28 blur-3xl" />
 
-                                            <AnimatePresence mode="wait">
-                                                <motion.div
-                                                    key={activePreviewLogo.name}
-                                                    initial={{ opacity: 0, scale: 0.92, y: 12 }}
-                                                    animate={{ opacity: 1, scale: 1, y: 0 }}
-                                                    exit={{ opacity: 0, scale: 0.96, y: -12 }}
-                                                    transition={{ duration: 0.22, ease: 'easeOut' }}
-                                                    className="relative z-10 flex flex-col items-center gap-5 text-center"
-                                                >
-                                                    <div className="flex h-[230px] w-[230px] items-center justify-center rounded-[36px] border border-white/60 bg-white/88 p-6 shadow-[0_24px_70px_-34px_rgba(15,23,42,0.3)] backdrop-blur">
-                                                        <PreviewLogoArtwork logo={activePreviewLogo} />
+                                            <div className="relative z-10 flex min-h-[360px] flex-col">
+                                                <div className="flex flex-wrap items-start justify-between gap-3">
+                                                    <div className="flex max-w-[58%] flex-wrap gap-2">
+                                                        {previewSignalPills.map((pill, index) => (
+                                                            <span
+                                                                key={pill}
+                                                                className={`rounded-full border border-white/60 bg-white/72 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-600 backdrop-blur ${
+                                                                    index === 2 ? 'hidden sm:inline-flex' : ''
+                                                                }`}
+                                                            >
+                                                                {pill}
+                                                            </span>
+                                                        ))}
                                                     </div>
+                                                    <div className="inline-flex shrink-0 items-center gap-2 rounded-full border border-white/60 bg-white/76 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-emerald-700 backdrop-blur">
+                                                        <span className="h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_0_4px_rgba(74,222,128,0.18)]" />
+                                                        Live sync
+                                                    </div>
+                                                </div>
 
-                                                    <div className="rounded-full border border-white/60 bg-white/88 px-5 py-2 text-sm font-semibold text-slate-700 shadow-sm">
-                                                        {activePreviewLogo.name}
-                                                    </div>
-                                                </motion.div>
-                                            </AnimatePresence>
+                                                <div className="flex flex-1 items-center justify-center px-2 pb-2 pt-5 sm:px-4 sm:pt-6">
+                                                    <AnimatePresence mode="wait">
+                                                        <motion.div
+                                                            key={activePreviewLogo.name}
+                                                            initial={{ opacity: 0, scale: 0.92, y: 12 }}
+                                                            animate={{ opacity: 1, scale: 1, y: 0 }}
+                                                            exit={{ opacity: 0, scale: 0.96, y: -12 }}
+                                                            transition={{ duration: 0.22, ease: 'easeOut' }}
+                                                            className="relative z-10 flex flex-col items-center gap-4 text-center"
+                                                        >
+                                                            <div className="relative flex h-[204px] w-[204px] items-center justify-center rounded-[32px] border border-white/65 bg-white/88 p-5 shadow-[0_24px_72px_-36px_rgba(15,23,42,0.32)] backdrop-blur sm:h-[228px] sm:w-[228px] sm:rounded-[36px] sm:p-6">
+                                                                <div className="absolute inset-x-10 bottom-4 h-10 rounded-full bg-slate-900/10 blur-2xl" />
+                                                                <PreviewLogoArtwork logo={activePreviewLogo} />
+                                                            </div>
+
+                                                            <div className="space-y-2">
+                                                                <div className="inline-flex items-center gap-2 rounded-full border border-white/65 bg-white/88 px-5 py-2 text-sm font-semibold text-slate-700 shadow-sm">
+                                                                    <CheckCircle2 size={15} className="text-emerald-500" />
+                                                                    {activePreviewLogo.name}
+                                                                </div>
+                                                                <p className="mx-auto max-w-[24ch] text-xs font-medium leading-relaxed text-slate-600">
+                                                                    Connected cleanly into one shared feedback stream.
+                                                                </p>
+                                                            </div>
+                                                        </motion.div>
+                                                    </AnimatePresence>
+                                                </div>
+                                            </div>
                                         </div>
                                     </div>
 
                                     <div className="space-y-4">
                                         <div className="grid gap-3">
-                                            {summaryCards.map(([label, value]) => (
-                                                <div key={label} className="rounded-[24px] border border-slate-200 bg-slate-50 p-4">
-                                                    <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">{label}</p>
-                                                    <p className="mt-2 text-sm font-medium leading-relaxed text-slate-700">{value}</p>
-                                                </div>
-                                            ))}
+                                            {summaryCards.map(({ label, value, meta, tone, icon: Icon }) => {
+                                                const styles = summaryToneStyles[tone];
+
+                                                return (
+                                                    <div
+                                                        key={label}
+                                                        className="relative overflow-hidden rounded-[24px] border border-slate-200/90 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(245,248,252,0.92))] p-4 shadow-[0_18px_45px_-34px_rgba(15,23,42,0.2)]"
+                                                    >
+                                                        <div className={`pointer-events-none absolute inset-x-0 top-0 h-16 bg-gradient-to-br ${styles.glow}`} />
+                                                        <div className="relative flex items-start gap-3">
+                                                            <div className={`mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl ${styles.icon}`}>
+                                                                <Icon size={17} />
+                                                            </div>
+                                                            <div className="min-w-0">
+                                                                <div className="flex flex-wrap items-center gap-2">
+                                                                    <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-400">{label}</p>
+                                                                    <span className={`rounded-full border px-2 py-1 text-[9px] font-semibold uppercase tracking-[0.14em] ${styles.badge}`}>
+                                                                        {meta}
+                                                                    </span>
+                                                                </div>
+                                                                <p className="mt-2 text-[15px] font-semibold leading-relaxed text-slate-900">{value}</p>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
                                         </div>
 
-                                        <div className="rounded-[28px] border border-slate-200 bg-slate-50 p-5">
-                                            <div className="flex items-center justify-between gap-4">
-                                                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Risk trend</p>
-                                                <BarChart2 size={18} className="text-cyan-600" />
+                                        <div className="relative overflow-hidden rounded-[28px] border border-slate-200/90 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(239,247,255,0.94))] p-5 shadow-[0_24px_55px_-40px_rgba(15,23,42,0.22)]">
+                                            <div className="pointer-events-none absolute right-0 top-0 h-28 w-28 bg-cyan-200/35 blur-3xl" />
+                                            <div className="pointer-events-none absolute left-8 bottom-0 h-24 w-24 bg-emerald-200/25 blur-3xl" />
+
+                                            <div className="relative flex items-start justify-between gap-4">
+                                                <div className="max-w-[24ch]">
+                                                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Risk trend</p>
+                                                    <p className="mt-2 text-sm font-semibold leading-relaxed text-slate-800">
+                                                        Onboarding and billing friction are rising together.
+                                                    </p>
+                                                </div>
+
+                                                <div className="rounded-full border border-cyan-200 bg-white/88 px-3 py-2 text-right shadow-sm">
+                                                    <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-cyan-700">+31% 30 days</p>
+                                                </div>
                                             </div>
 
-                                            <div className="mt-5 flex h-32 items-end gap-2">
-                                                {bars.map((height, index) => (
-                                                    <motion.div
-                                                        key={index}
-                                                        className="flex-1 rounded-t-2xl bg-gradient-to-t from-cyan-500 via-sky-400 to-emerald-300"
-                                                        initial={{ height: 12 }}
-                                                        animate={{ height: `${height}%` }}
-                                                        transition={{ duration: 0.6, delay: index * 0.05 }}
-                                                    />
+                                            <div className="relative mt-5">
+                                                <div className="pointer-events-none absolute inset-x-0 top-4 h-px bg-[linear-gradient(90deg,transparent,rgba(148,163,184,0.3),transparent)]" />
+                                                <div className="flex h-32 items-end gap-2 sm:gap-3">
+                                                    {bars.map((height, index) => (
+                                                        <div key={index} className="relative flex h-full flex-1 items-end">
+                                                            <div className="absolute inset-x-0 bottom-0 h-full rounded-t-[20px] bg-slate-100/70" />
+                                                            <motion.div
+                                                                className="relative w-full rounded-t-[20px] bg-gradient-to-t from-cyan-500 via-sky-400 to-emerald-300 shadow-[0_18px_30px_-20px_rgba(14,165,233,0.7)]"
+                                                                initial={{ height: 12 }}
+                                                                animate={{ height: `${height}%` }}
+                                                                transition={{ duration: 0.6, delay: index * 0.05 }}
+                                                            />
+                                                            {index === bars.length - 1 && (
+                                                                <div className="absolute right-0 top-1 rounded-full border border-cyan-200 bg-white/92 px-2 py-1 text-[9px] font-semibold uppercase tracking-[0.14em] text-cyan-700 shadow-sm">
+                                                                    Peak
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+
+                                            <div className="mt-4 flex flex-wrap gap-2">
+                                                {riskTrendTags.map((tag) => (
+                                                    <span key={tag} className="rounded-full border border-slate-200 bg-white/88 px-3 py-1 text-[11px] font-medium text-slate-600">
+                                                        {tag}
+                                                    </span>
                                                 ))}
                                             </div>
                                         </div>
@@ -398,15 +524,15 @@ const Home = () => {
                                 </div>
                             </div>
 
-                            <div className="relative mt-6 flex flex-col gap-4 lg:flex-row lg:items-start lg:gap-0 lg:pb-6">
+                            <div className="relative mt-6 flex flex-col gap-4 lg:mx-auto lg:w-[94%] lg:flex-row lg:items-start lg:justify-center lg:gap-4 lg:pt-2 lg:pb-8 xl:w-[90%] xl:gap-5 xl:pb-10 lg:[perspective:2200px] lg:[transform-style:preserve-3d]">
                                 <motion.article
                                     initial={{ opacity: 0, y: 20 }}
                                     whileInView={{ opacity: 1, y: 0 }}
                                     viewport={{ once: true, margin: '-80px' }}
                                     transition={{ duration: 0.42 }}
-                                    className="relative z-10 overflow-hidden rounded-[26px] border border-slate-200 bg-white shadow-[0_30px_80px_-54px_rgba(15,23,42,0.18)] ring-1 ring-white/80 lg:w-[38%]"
+                                    className="relative z-10 overflow-hidden rounded-[26px] border border-slate-200 bg-white shadow-[0_30px_80px_-54px_rgba(15,23,42,0.18)] ring-1 ring-white/80 after:pointer-events-none after:absolute after:inset-0 after:bg-[linear-gradient(135deg,rgba(255,255,255,0.44),transparent_34%,transparent_70%,rgba(14,165,233,0.05))] after:content-[''] lg:w-[33%] lg:max-w-[500px] lg:flex-none lg:origin-bottom-right lg:[transform-style:preserve-3d] lg:[transform:translate3d(0,0,0)_rotateX(4deg)_rotateY(6deg)] lg:shadow-[0_54px_90px_-56px_rgba(15,23,42,0.36)] xl:w-[32%] xl:max-w-[520px]"
                                 >
-                                    <div className="relative flex items-center justify-between border-b border-slate-200 bg-[linear-gradient(180deg,rgba(248,250,252,0.98),rgba(241,245,249,0.96))] px-4 py-3">
+                                    <div className="relative z-10 flex items-center justify-between border-b border-slate-200 bg-[linear-gradient(180deg,rgba(248,250,252,0.98),rgba(241,245,249,0.96))] px-4 py-3 lg:[transform:translateZ(24px)]">
                                         <div className="flex items-center gap-2">
                                             <span className="h-2.5 w-2.5 rounded-full bg-rose-400" />
                                             <span className="h-2.5 w-2.5 rounded-full bg-amber-300" />
@@ -417,7 +543,7 @@ const Home = () => {
                                         </span>
                                     </div>
 
-                                    <div className="relative space-y-4 p-5">
+                                    <div className="relative z-10 space-y-4 p-5 lg:[transform:translateZ(34px)]">
                                         <div className="flex items-start justify-between gap-3">
                                             <h3 className="max-w-[18ch] text-lg font-semibold leading-tight text-slate-950">
                                                 {feedbackDemo.summary}
@@ -459,9 +585,9 @@ const Home = () => {
                                     whileInView={{ opacity: 1, y: 0 }}
                                     viewport={{ once: true, margin: '-80px' }}
                                     transition={{ duration: 0.42, delay: 0.07 }}
-                                    className="relative z-20 overflow-hidden rounded-[26px] border border-slate-200 bg-white shadow-[0_30px_80px_-54px_rgba(15,23,42,0.18)] ring-1 ring-white/80 lg:-ml-5 lg:mt-5 lg:w-[30%]"
+                                    className="relative z-20 overflow-hidden rounded-[26px] border border-slate-200 bg-white shadow-[0_30px_80px_-54px_rgba(15,23,42,0.18)] ring-1 ring-white/80 after:pointer-events-none after:absolute after:inset-0 after:bg-[linear-gradient(145deg,rgba(255,255,255,0.42),transparent_36%,transparent_68%,rgba(248,113,113,0.05))] after:content-[''] lg:w-[25%] lg:max-w-[390px] lg:flex-none lg:origin-bottom-center lg:[transform-style:preserve-3d] lg:[transform:translate3d(0,22px,14px)_rotateX(4deg)_rotateY(0deg)] lg:shadow-[0_58px_92px_-56px_rgba(15,23,42,0.38)] xl:w-[24%] xl:max-w-[410px]"
                                 >
-                                    <div className="relative flex items-center justify-between border-b border-slate-200 bg-[linear-gradient(180deg,rgba(248,250,252,0.98),rgba(241,245,249,0.96))] px-4 py-3">
+                                    <div className="relative z-10 flex items-center justify-between border-b border-slate-200 bg-[linear-gradient(180deg,rgba(248,250,252,0.98),rgba(241,245,249,0.96))] px-4 py-3 lg:[transform:translateZ(24px)]">
                                         <div className="flex items-center gap-2">
                                             <span className="h-2.5 w-2.5 rounded-full bg-rose-400" />
                                             <span className="h-2.5 w-2.5 rounded-full bg-amber-300" />
@@ -472,7 +598,7 @@ const Home = () => {
                                         </span>
                                     </div>
 
-                                    <div className="relative space-y-4 p-5">
+                                    <div className="relative z-10 space-y-4 p-5 lg:[transform:translateZ(36px)]">
                                         <div className="flex items-start justify-between gap-3">
                                             <div>
                                                 <h3 className="text-[34px] font-semibold leading-none tracking-tight text-slate-950">Negative</h3>
@@ -511,9 +637,9 @@ const Home = () => {
                                     whileInView={{ opacity: 1, y: 0 }}
                                     viewport={{ once: true, margin: '-80px' }}
                                     transition={{ duration: 0.42, delay: 0.14 }}
-                                    className="relative z-30 overflow-hidden rounded-[26px] border border-slate-200 bg-white shadow-[0_30px_80px_-54px_rgba(15,23,42,0.18)] ring-1 ring-white/80 lg:-ml-5 lg:mt-10 lg:w-[38%]"
+                                    className="relative z-30 overflow-hidden rounded-[26px] border border-slate-200 bg-white shadow-[0_30px_80px_-54px_rgba(15,23,42,0.18)] ring-1 ring-white/80 after:pointer-events-none after:absolute after:inset-0 after:bg-[linear-gradient(145deg,rgba(255,255,255,0.42),transparent_34%,transparent_70%,rgba(251,191,36,0.06))] after:content-[''] lg:w-[33%] lg:max-w-[520px] lg:flex-none lg:origin-bottom-left lg:[transform-style:preserve-3d] lg:[transform:translate3d(0,42px,22px)_rotateX(4deg)_rotateY(-6deg)] lg:shadow-[0_66px_98px_-56px_rgba(15,23,42,0.42)] xl:w-[32%] xl:max-w-[540px]"
                                 >
-                                    <div className="relative flex items-center justify-between border-b border-slate-200 bg-[linear-gradient(180deg,rgba(248,250,252,0.98),rgba(241,245,249,0.96))] px-4 py-3">
+                                    <div className="relative z-10 flex items-center justify-between border-b border-slate-200 bg-[linear-gradient(180deg,rgba(248,250,252,0.98),rgba(241,245,249,0.96))] px-4 py-3 lg:[transform:translateZ(24px)]">
                                         <div className="flex items-center gap-2">
                                             <span className="h-2.5 w-2.5 rounded-full bg-rose-400" />
                                             <span className="h-2.5 w-2.5 rounded-full bg-amber-300" />
@@ -524,7 +650,7 @@ const Home = () => {
                                         </span>
                                     </div>
 
-                                    <div className="relative space-y-4 p-5">
+                                    <div className="relative z-10 space-y-4 p-5 lg:[transform:translateZ(38px)]">
                                         <div className="flex items-start justify-between gap-3">
                                             <h3 className="max-w-[22ch] text-xl font-semibold leading-tight text-slate-950">
                                                 {feedbackMainProblem.title}
@@ -534,7 +660,7 @@ const Home = () => {
                                             </span>
                                         </div>
 
-                                        <div className="grid gap-3 md:grid-cols-2">
+                                        <div className="grid gap-3 xl:grid-cols-2">
                                             <div className="rounded-[18px] border border-slate-200 bg-white p-3.5 shadow-[0_1px_0_rgba(255,255,255,0.8)]">
                                                 <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">Problem</p>
                                                 <p className="mt-2 text-sm leading-relaxed text-slate-700">{feedbackMainProblem.problem}</p>
@@ -545,7 +671,7 @@ const Home = () => {
                                             </div>
                                         </div>
 
-                                        <div className="flex items-center gap-3 rounded-[20px] border border-slate-200 bg-white px-3.5 py-3.5 shadow-[0_1px_0_rgba(255,255,255,0.9)]">
+                                        <div className="flex flex-col items-start gap-3 rounded-[20px] border border-slate-200 bg-white px-3.5 py-3.5 shadow-[0_1px_0_rgba(255,255,255,0.9)] sm:flex-row sm:items-center">
                                             <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-white text-cyan-700 shadow-sm ring-1 ring-cyan-100">
                                                 <Sparkles size={16} />
                                             </div>
@@ -556,9 +682,10 @@ const Home = () => {
                                             </div>
                                             <button
                                                 type="button"
-                                            onClick={openHorizonAvailabilityNotice}
-                                                className="inline-flex shrink-0 items-center justify-center rounded-full bg-slate-950 px-4 py-2 text-xs font-semibold text-white transition-colors hover:bg-slate-800"
+                                                onClick={openHorizonAvailabilityNotice}
+                                                className="inline-flex shrink-0 items-center justify-center self-start rounded-full bg-slate-950 px-4 py-2 text-xs font-semibold text-white transition-colors hover:bg-slate-800 sm:self-auto"
                                             >
+                                                {isHorizonLocked && <Lock size={13} className="mr-1.5" />}
                                                 Generate
                                             </button>
                                         </div>
@@ -657,6 +784,7 @@ const Home = () => {
                                 onClick={openHorizonAvailabilityNotice}
                                 className="group inline-flex items-center gap-2 rounded-full bg-slate-950 px-6 py-3 text-sm font-bold text-white transition-all hover:bg-slate-800"
                             >
+                                {isHorizonLocked && <Lock size={15} />}
                                 Explore the product
                                 <ArrowRight size={16} className="transition-transform group-hover:translate-x-1" />
                             </button>

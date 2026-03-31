@@ -1,6 +1,6 @@
 import React from 'react';
 import logoWordmark from '../assets/logo_f.png';
-import { Linkedin } from 'lucide-react';
+import { Linkedin, Lock } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useHorizonAvailabilityNotice } from './HorizonAvailabilityNoticeProvider';
 
@@ -14,7 +14,7 @@ const XIcon = ({ size = 16, className = '' }) => (
 const Footer = () => {
     const navigate = useNavigate();
     const location = useLocation();
-    const { openHorizonAvailabilityNotice } = useHorizonAvailabilityNotice();
+    const { openHorizonAvailabilityNotice, isHorizonLocked } = useHorizonAvailabilityNotice();
     const isHomeRoute = location.pathname === '/';
 
     if (isHomeRoute) {
@@ -30,8 +30,9 @@ const Footer = () => {
                             <div className="mt-5 flex flex-wrap gap-3">
                                 <button
                                     onClick={openHorizonAvailabilityNotice}
-                                    className="rounded-full bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-slate-800"
+                                    className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-slate-800"
                                 >
+                                    {isHorizonLocked && <Lock size={14} />}
                                     Open Horizon
                                 </button>
                                 <button
@@ -47,7 +48,7 @@ const Footer = () => {
                             <div>
                                 <h4 className="text-sm font-semibold text-slate-900">Platform</h4>
                                 <ul className="mt-3 space-y-2 text-sm">
-                                    <li><button type="button" onClick={openHorizonAvailabilityNotice} className="bg-transparent p-0 text-left text-slate-600 transition-colors hover:text-slate-900">Horizon App</button></li>
+                                    <li><button type="button" onClick={openHorizonAvailabilityNotice} className="inline-flex items-center gap-2 bg-transparent p-0 text-left text-slate-600 transition-colors hover:text-slate-900">{isHorizonLocked && <Lock size={13} />}Horizon App</button></li>
                                     <li><Link to="/#how-it-works" className="text-slate-600 hover:text-slate-900 transition-colors">How It Works</Link></li>
                                     <li><Link to="/academy" className="text-slate-600 hover:text-slate-900 transition-colors">Academy</Link></li>
                                     <li><Link to="/#contact" className="text-slate-600 hover:text-slate-900 transition-colors">Contact</Link></li>
@@ -97,7 +98,7 @@ const Footer = () => {
                         <h4 className="text-sm font-semibold mb-3 text-white">Platform</h4>
                         <ul className="space-y-2 text-sm">
                             <li><Link to="/#how-it-works" className="text-secondary hover:text-brand-purple transition-colors">Workflow</Link></li>
-                            <li><button type="button" onClick={openHorizonAvailabilityNotice} className="bg-transparent p-0 text-left text-secondary transition-colors hover:text-brand-purple">Horizon App</button></li>
+                            <li><button type="button" onClick={openHorizonAvailabilityNotice} className="inline-flex items-center gap-2 bg-transparent p-0 text-left text-secondary transition-colors hover:text-brand-purple">{isHorizonLocked && <Lock size={13} />}Horizon App</button></li>
                             <li><Link to="/academy" className="text-secondary hover:text-brand-purple transition-colors">Academy</Link></li>
                             <li><Link to="/#contact" className="text-secondary hover:text-brand-purple transition-colors">Contact</Link></li>
                         </ul>
