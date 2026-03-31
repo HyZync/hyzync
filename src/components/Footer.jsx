@@ -1,5 +1,5 @@
 import React from 'react';
-import logo from '../assets/logo.png';
+import logoWordmark from '../assets/logo_f.png';
 import { Linkedin } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useHorizonAvailabilityNotice } from './HorizonAvailabilityNoticeProvider';
@@ -23,7 +23,7 @@ const Footer = () => {
                 <div className="max-w-screen-2xl mx-auto px-6">
                     <div className="grid grid-cols-1 gap-10 lg:grid-cols-[1.2fr_0.8fr]">
                         <div>
-                            <img src={logo} alt="Hyzync Logo" className="h-8 w-auto mb-4" />
+                            <img src={logoWordmark} alt="Hyzync" className="mb-5 h-10 w-auto object-contain md:h-11" />
                             <p className="max-w-xl text-sm leading-relaxed text-slate-600">
                                 Horizon helps teams turn reviews, tickets, CRM notes, and survey feedback into clear priorities and faster action.
                             </p>
@@ -83,7 +83,11 @@ const Footer = () => {
             <div className="max-w-screen-2xl mx-auto px-6">
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-8 mb-10">
                     <div className="md:col-span-1">
-                        <img src={logo} alt="Hyzync Logo" className="h-8 w-auto mb-4" />
+                        <img
+                            src={logoWordmark}
+                            alt="Hyzync"
+                            className="mb-5 h-10 w-auto object-contain [filter:brightness(0)_invert(1)] md:h-11"
+                        />
                         <p className="text-secondary leading-relaxed text-sm">
                             Horizon helps companies turn fragmented customer feedback into product, retention, and support action.
                         </p>
@@ -166,7 +170,11 @@ const Footer = () => {
                         {/* Left: Logo + copyright + Links */}
                         <div className="flex flex-col lg:flex-row items-center gap-4 text-[11px] text-secondary font-medium">
                             <div className="flex items-center gap-3">
-                                <img src={logo} alt="Hyzync" className="h-5 w-auto opacity-70" />
+                                <img
+                                    src={logoWordmark}
+                                    alt="Hyzync"
+                                    className="h-6 w-auto object-contain opacity-85 [filter:brightness(0)_invert(1)]"
+                                />
                                 <span className="text-white/40">&copy; 2026 Hyzync Inc. All Rights Reserved</span>
                             </div>
 

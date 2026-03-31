@@ -21,24 +21,24 @@ const PromoBanner = () => {
                 initial={{ height: 0, opacity: 0 }}
                 animate={{ height: 'auto', opacity: 1 }}
                 exit={{ height: 0, opacity: 0 }}
-                className="bg-gradient-to-r from-cyan-500 via-emerald-500 to-cyan-500 text-slate-950 relative z-[60]"
+                className="relative z-[60] border-b border-black/5 bg-[linear-gradient(90deg,#0ea5b8_0%,#18b5a5_48%,#46bff0_100%)] text-slate-950"
             >
-                <div className="max-w-screen-2xl mx-auto px-4 py-2 sm:py-3 flex items-center justify-between gap-4">
-                    <div className="flex-1 flex flex-col sm:flex-row items-center justify-center gap-2 text-xs sm:text-sm font-medium text-center">
-                        <span className="flex items-center gap-1 bg-black/15 px-2 py-0.5 rounded text-white border border-black/20 shadow-sm">
+                <div className="mx-auto flex max-w-[1660px] items-center justify-between gap-4 px-4 py-2.5 sm:px-6">
+                    <div className="flex flex-1 flex-col items-center justify-center gap-2 text-center sm:flex-row sm:justify-start sm:text-left">
+                        <span className="inline-flex items-center gap-1.5 rounded-full border border-white/25 bg-slate-950/12 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.18)] backdrop-blur">
                             <Sparkles size={12} className="text-white" />
-                            <span className="font-bold">NEW</span>
+                            New
                         </span>
 
-                        <span>
-                            <span className="opacity-90">Horizon is the unified feedback intelligence platform for teams handling reviews, tickets, surveys, and CRM signals.</span>
-                            <span className="hidden sm:inline mx-2 text-black/30">|</span>
-                            <span className="opacity-75">Request priority onboarding</span>
+                        <span className="text-xs font-medium leading-relaxed text-slate-950 sm:text-sm">
+                            <span className="font-semibold">Horizon</span> unifies reviews, tickets, surveys, and CRM signals into one feedback intelligence workflow.
+                            <span className="hidden sm:inline mx-3 text-black/25">|</span>
+                            <span className="opacity-80">Priority onboarding available</span>
                         </span>
 
                         <button
                             onClick={handleClaimOffer}
-                            className="inline-flex items-center gap-1 underline underline-offset-2 hover:text-black/60 transition-colors ml-2 font-bold whitespace-nowrap cursor-pointer"
+                            className="inline-flex items-center gap-1 rounded-full bg-slate-950 px-4 py-2 text-xs font-semibold text-white transition-colors hover:bg-slate-800 sm:ml-2 sm:text-sm"
                         >
                             Apply Now <ArrowRight size={14} />
                         </button>
@@ -46,7 +46,7 @@ const PromoBanner = () => {
 
                     <button
                         onClick={() => setIsVisible(false)}
-                        className="text-black/60 hover:text-black transition-colors p-1"
+                        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/25 bg-white/12 text-slate-900/70 transition-colors hover:bg-white/20 hover:text-slate-950"
                         aria-label="Close banner"
                     >
                         <X size={16} />

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Menu, X } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import logo from '../assets/logo.png';
+import logoWordmark from '../assets/logo_f.png';
 import { useHorizonAvailabilityNotice } from './HorizonAvailabilityNoticeProvider';
 
 const Navbar = () => {
@@ -103,21 +103,21 @@ const Navbar = () => {
                 isVisible ? 'translate-y-0 opacity-100' : '-translate-y-6 opacity-0'
             } pointer-events-none`}
         >
-            <div className="pointer-events-auto relative w-full max-w-[1280px]">
+            <div className="pointer-events-auto relative w-full max-w-[1660px]">
                 <div
                     className={`absolute -inset-2 rounded-[38px] blur-3xl transition-all duration-500 ${
                         isHomeRoute
-                            ? 'bg-[radial-gradient(circle_at_15%_20%,rgba(34,211,238,0.22),transparent_30%),radial-gradient(circle_at_85%_50%,rgba(59,130,246,0.16),transparent_32%)] opacity-100'
+                            ? 'bg-[radial-gradient(circle_at_15%_20%,rgba(34,211,238,0.18),transparent_30%),radial-gradient(circle_at_85%_50%,rgba(59,130,246,0.12),transparent_32%)] opacity-100'
                             : 'bg-fuchsia-500/12 opacity-75'
                     }`}
                 />
 
                 <div
-                    className={`relative flex items-center justify-between gap-3 overflow-hidden rounded-[32px] border px-3 py-3 backdrop-blur-[24px] transition-all duration-500 ${
-                        isScrolled ? 'md:px-4 md:py-2.5' : 'md:px-5 md:py-3.5'
+                    className={`relative flex items-center justify-between gap-4 overflow-hidden rounded-[32px] border px-3 py-2.5 backdrop-blur-[24px] transition-all duration-500 ${
+                        isScrolled ? 'md:px-4 md:py-2.5' : 'md:px-5 md:py-3'
                     } ${
                         isHomeRoute
-                            ? 'border-white/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.88),rgba(240,251,255,0.84))] text-slate-900 shadow-[0_30px_90px_-44px_rgba(14,116,144,0.22)]'
+                            ? 'border-white/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.94),rgba(244,249,255,0.9))] text-slate-900 shadow-[0_28px_70px_-42px_rgba(15,23,42,0.16)]'
                             : 'border-white/10 bg-slate-950/55 text-white shadow-[0_28px_90px_-42px_rgba(15,23,42,0.58)]'
                     }`}
                 >
@@ -142,29 +142,28 @@ const Navbar = () => {
                     <Link
                         to="/"
                         onClick={handleLogoClick}
-                        className={`group relative flex shrink-0 items-center gap-3 rounded-[26px] border px-3 py-2.5 transition-all duration-500 ${
-                            isHomeRoute
-                                ? 'border-white/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.92),rgba(245,250,255,0.9))] shadow-[0_18px_40px_-34px_rgba(15,23,42,0.18)] hover:bg-white'
-                                : 'border-white/10 bg-white/5 hover:bg-white/10'
-                        }`}
+                        className="group relative flex shrink-0 items-center gap-3 px-1.5 py-1 transition-all duration-500 md:gap-4"
                     >
-                        <div
-                            className={`relative flex items-center justify-center overflow-hidden rounded-[18px] px-3 py-2 transition-all duration-500 ${
+                        <img
+                            src={logoWordmark}
+                            alt="Hyzync"
+                            className={`relative z-10 block w-auto shrink-0 object-contain transition-all duration-500 ${
                                 isHomeRoute
-                                    ? 'bg-[linear-gradient(135deg,#14323e_0%,#0f766e_42%,#2563eb_100%)] shadow-[0_22px_45px_-28px_rgba(14,116,144,0.45)]'
-                                    : 'bg-[linear-gradient(135deg,rgba(15,23,42,0.92),rgba(8,145,178,0.6),rgba(79,70,229,0.52))] shadow-[0_22px_45px_-28px_rgba(6,182,212,0.24)]'
+                                    ? isScrolled
+                                        ? 'h-8 md:h-9'
+                                        : 'h-9 md:h-10'
+                                    : isScrolled
+                                        ? 'h-8 md:h-9 [filter:brightness(0)_invert(1)]'
+                                        : 'h-9 md:h-10 [filter:brightness(0)_invert(1)]'
                             }`}
-                        >
-                            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.24),transparent_36%)]" />
-                            <div className="pointer-events-none absolute inset-y-0 right-0 w-16 bg-[linear-gradient(90deg,transparent,rgba(255,255,255,0.12))]" />
-                            <img src={logo} alt="Hyzync Logo" className={`relative z-10 w-auto transition-all duration-500 ${isScrolled ? 'h-7' : 'h-8'}`} />
-                        </div>
-                        <div className={`hidden min-w-0 overflow-hidden transition-all duration-500 lg:block ${isScrolled ? 'max-w-[9.5rem]' : 'max-w-[11.5rem]'}`}>
-                            <span className={`block text-[9px] font-semibold uppercase tracking-[0.28em] ${isHomeRoute ? 'text-slate-400' : 'text-white/40'}`}>
-                                Hyzync
+                        />
+                        <div className={`hidden h-9 w-px shrink-0 rounded-full transition-all duration-500 xl:block ${isHomeRoute ? 'bg-slate-200' : 'bg-white/14'}`} />
+                        <div className={`hidden min-w-0 transition-all duration-500 xl:block ${isScrolled ? 'max-w-[13.5rem]' : 'max-w-[16rem]'}`}>
+                            <span className={`block text-[10px] font-semibold uppercase tracking-[0.26em] ${isHomeRoute ? 'text-slate-400' : 'text-white/40'}`}>
+                                Feedback Platform
                             </span>
-                            <span className={`mt-1 block text-[13px] font-semibold leading-none ${isHomeRoute ? 'text-slate-700' : 'text-white/80'}`}>
-                                Feedback intelligence
+                            <span className={`mt-1.5 block text-[14px] font-semibold leading-[1.15] ${isHomeRoute ? 'text-slate-700' : 'text-white/80'}`}>
+                                Unified customer intelligence
                             </span>
                         </div>
                     </Link>
@@ -181,7 +180,7 @@ const Navbar = () => {
                         <div
                             className={`ml-auto flex items-center gap-1 rounded-[24px] border p-1.5 ${
                                 isHomeRoute
-                                    ? 'border-white/80 bg-white/74 shadow-[0_18px_44px_-34px_rgba(15,23,42,0.16)]'
+                                    ? 'border-white/85 bg-[linear-gradient(180deg,rgba(255,255,255,0.9),rgba(246,250,255,0.86))] shadow-[0_18px_44px_-34px_rgba(15,23,42,0.12)]'
                                     : 'border-white/10 bg-white/6'
                             }`}
                         >
@@ -196,15 +195,15 @@ const Navbar = () => {
                                             isActive
                                                 ? isHomeRoute
                                                     ? item.special
-                                                        ? 'bg-[linear-gradient(135deg,#ecfeff_0%,#dbeafe_100%)] text-cyan-800 shadow-[0_18px_40px_-28px_rgba(8,145,178,0.3)]'
+                                                        ? 'bg-[linear-gradient(135deg,#ecfeff_0%,#dbeafe_100%)] text-cyan-800 shadow-[0_18px_40px_-28px_rgba(8,145,178,0.2)]'
                                                         : 'bg-slate-950 text-white shadow-[0_18px_40px_-28px_rgba(15,23,42,0.55)]'
                                                     : 'bg-white text-slate-950 shadow-[0_18px_40px_-28px_rgba(255,255,255,0.24)]'
                                                 : item.special
                                                     ? isHomeRoute
-                                                        ? 'text-cyan-700 hover:bg-cyan-50/90'
+                                                        ? 'text-cyan-700 hover:bg-cyan-50/80'
                                                         : 'bg-cyan-400/10 text-cyan-300 hover:bg-cyan-400/16'
                                                     : isHomeRoute
-                                                        ? 'text-slate-600 hover:bg-slate-50 hover:text-slate-950'
+                                                        ? 'text-slate-600 hover:bg-white hover:text-slate-950'
                                                         : 'text-white/70 hover:bg-white/10 hover:text-white'
                                         }`}
                                     >
