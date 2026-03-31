@@ -146,21 +146,60 @@ const Navbar = () => {
                             isHomeRoute ? 'md:bg-white/40 md:shadow-[inset_0_1px_0_rgba(255,255,255,0.65)]' : 'md:bg-white/[0.03]'
                         }`}
                     >
-                        <img
-                            src={logoWordmark}
-                            alt="Hyzync"
-                            className={`relative z-10 block w-auto shrink-0 object-contain transition-all duration-500 ${
-                                isHomeRoute
-                                    ? isScrolled
-                                        ? 'h-[28px] md:h-[30px]'
-                                        : 'h-[30px] md:h-[34px]'
-                                    : isScrolled
-                                        ? 'h-[28px] md:h-[30px] [filter:brightness(0)_invert(1)]'
-                                        : 'h-[30px] md:h-[34px] [filter:brightness(0)_invert(1)]'
-                            }`}
-                        />
-                        <div className={`hidden h-8 w-px shrink-0 rounded-full transition-all duration-500 xl:block ${isHomeRoute ? 'bg-slate-200' : 'bg-white/14'}`} />
-                        <div className={`hidden min-w-0 transition-all duration-500 xl:block ${isScrolled ? 'max-w-[12rem]' : 'max-w-[13.5rem]'}`}>
+                        <div className="relative z-10 flex shrink-0 items-center overflow-visible">
+                            <div className="pointer-events-none absolute inset-x-[1%] bottom-[2%] h-[32px] overflow-visible">
+                                <div
+                                    className={`absolute left-[-3%] bottom-[1px] h-[20px] w-[38%] rounded-full blur-[13px] animate-navbar-logo-fog ${
+                                        isHomeRoute
+                                            ? 'bg-[radial-gradient(ellipse_at_40%_50%,rgba(34,211,238,0.92)_0%,rgba(56,189,248,0.62)_48%,transparent_84%)]'
+                                            : 'bg-[radial-gradient(ellipse_at_40%_50%,rgba(34,211,238,0.86)_0%,rgba(56,189,248,0.56)_48%,transparent_84%)]'
+                                    }`}
+                                />
+                                <div
+                                    className={`absolute left-[8%] bottom-0 h-[24px] w-[60%] rounded-full blur-[17px] animate-navbar-logo-fog-wide ${
+                                        isHomeRoute
+                                            ? 'bg-[radial-gradient(ellipse_at_46%_52%,rgba(56,189,248,0.88)_0%,rgba(14,165,233,0.54)_50%,transparent_84%)]'
+                                            : 'bg-[radial-gradient(ellipse_at_46%_52%,rgba(56,189,248,0.82)_0%,rgba(14,165,233,0.48)_50%,transparent_84%)]'
+                                    }`}
+                                />
+                                <div
+                                    className={`absolute left-[44%] bottom-[2px] h-[20px] w-[26%] rounded-full blur-[13px] animate-navbar-logo-fog-reverse ${
+                                        isHomeRoute
+                                            ? 'bg-[radial-gradient(ellipse_at_48%_50%,rgba(168,85,247,0.56)_0%,rgba(59,130,246,0.34)_46%,transparent_82%)]'
+                                            : 'bg-[radial-gradient(ellipse_at_48%_50%,rgba(168,85,247,0.62)_0%,rgba(59,130,246,0.38)_46%,transparent_82%)]'
+                                    }`}
+                                />
+                                <div
+                                    className={`absolute left-[16%] bottom-[5px] h-[12px] w-[40%] rounded-full blur-[9px] animate-navbar-logo-fog-lift ${
+                                        isHomeRoute
+                                            ? 'bg-[radial-gradient(ellipse_at_50%_50%,rgba(255,255,255,0.42)_0%,rgba(186,230,253,0.28)_52%,transparent_84%)]'
+                                            : 'bg-[radial-gradient(ellipse_at_50%_50%,rgba(186,230,253,0.24)_0%,rgba(125,211,252,0.14)_52%,transparent_84%)]'
+                                    }`}
+                                />
+                            </div>
+                            <div
+                                className={`pointer-events-none absolute left-[6%] bottom-[1px] h-[28px] w-[78%] blur-[20px] animate-navbar-logo-fog-wide ${
+                                    isHomeRoute
+                                        ? 'bg-[radial-gradient(ellipse_at_44%_52%,rgba(34,211,238,0.42)_0%,rgba(56,189,248,0.32)_38%,rgba(168,85,247,0.14)_62%,transparent_82%)]'
+                                        : 'bg-[radial-gradient(ellipse_at_44%_52%,rgba(34,211,238,0.34)_0%,rgba(56,189,248,0.24)_38%,rgba(168,85,247,0.16)_62%,transparent_82%)]'
+                                }`}
+                            />
+                            <img
+                                src={logoWordmark}
+                                alt="Hyzync"
+                                className={`relative z-10 block w-auto shrink-0 object-contain transition-all duration-500 ${
+                                    isHomeRoute
+                                        ? isScrolled
+                                            ? 'h-[28px] md:h-[30px]'
+                                            : 'h-[30px] md:h-[34px]'
+                                        : isScrolled
+                                            ? 'h-[28px] md:h-[30px] [filter:brightness(0)_invert(1)]'
+                                            : 'h-[30px] md:h-[34px] [filter:brightness(0)_invert(1)]'
+                                }`}
+                            />
+                        </div>
+                        <div className={`relative z-10 hidden h-8 w-px shrink-0 rounded-full transition-all duration-500 xl:block ${isHomeRoute ? 'bg-slate-200' : 'bg-white/14'}`} />
+                        <div className={`relative z-10 hidden min-w-0 transition-all duration-500 xl:block ${isScrolled ? 'max-w-[12rem]' : 'max-w-[13.5rem]'}`}>
                             <span className={`block text-[9px] font-semibold uppercase tracking-[0.3em] ${isHomeRoute ? 'text-slate-400' : 'text-white/40'}`}>
                                 Feedback Platform
                             </span>
@@ -171,13 +210,28 @@ const Navbar = () => {
                     </Link>
 
                     <div className="hidden min-w-0 flex-1 items-center gap-3 md:flex">
-                        <div
-                            className={`hidden h-px flex-1 lg:block ${
-                                isHomeRoute
-                                    ? 'bg-[linear-gradient(90deg,transparent,rgba(14,165,233,0.22),transparent)]'
-                                    : 'bg-[linear-gradient(90deg,transparent,rgba(255,255,255,0.18),transparent)]'
-                            }`}
-                        />
+                        <div className="hidden flex-1 lg:block">
+                            <div
+                                className={`relative h-px overflow-hidden rounded-full ${
+                                    isHomeRoute
+                                        ? 'bg-[linear-gradient(90deg,transparent,rgba(56,189,248,0.12),rgba(56,189,248,0.2),transparent)]'
+                                        : 'bg-[linear-gradient(90deg,transparent,rgba(56,189,248,0.12),rgba(56,189,248,0.18),transparent)]'
+                                }`}
+                            >
+                                <div
+                                    className={`pointer-events-none absolute inset-y-0 left-[-30%] w-[34%] animate-navbar-line-fill ${
+                                        isHomeRoute
+                                            ? 'bg-[linear-gradient(90deg,transparent,rgba(56,189,248,0),rgba(56,189,248,0.72),rgba(125,211,252,1),rgba(56,189,248,0.68),rgba(56,189,248,0),transparent)]'
+                                            : 'bg-[linear-gradient(90deg,transparent,rgba(56,189,248,0),rgba(56,189,248,0.58),rgba(125,211,252,0.88),rgba(56,189,248,0.54),rgba(56,189,248,0),transparent)]'
+                                    }`}
+                                />
+                                <div
+                                    className={`pointer-events-none absolute inset-y-[-6px] left-[-16%] w-[18%] blur-sm animate-navbar-line-fill ${
+                                        isHomeRoute ? 'bg-sky-300/50' : 'bg-sky-300/42'
+                                    }`}
+                                />
+                            </div>
+                        </div>
 
                         <div
                             className={`ml-auto flex items-center gap-1 rounded-[20px] border p-1 ${
