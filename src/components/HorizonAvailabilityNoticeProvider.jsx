@@ -93,11 +93,11 @@ export const HorizonAvailabilityNoticeProvider = ({ children }) => {
                                 </div>
 
                                 <h2 id="horizon-notice-title" className="mt-5 text-3xl font-semibold leading-tight text-slate-950 sm:text-[34px]">
-                                    Horizon FI will be available soon for your region.
+                                    Horizon FI will be available soon.
                                 </h2>
 
                                 <p className="mt-4 text-base leading-relaxed text-slate-600">
-                                    Thanks for visiting. We are expanding access carefully and will open Horizon FI in more regions soon.
+                                    Thanks for visiting. We are finalizing launch readiness and will open access very soon.
                                 </p>
 
                                 <div className="mt-6 rounded-[24px] border border-slate-200 bg-white/90 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.9)]">
@@ -106,9 +106,9 @@ export const HorizonAvailabilityNoticeProvider = ({ children }) => {
                                             <MapPin size={18} />
                                         </div>
                                         <div>
-                                            <p className="text-sm font-semibold text-slate-950">Regional rollout in progress</p>
+                                            <p className="text-sm font-semibold text-slate-950">Launch preparation in progress</p>
                                             <p className="mt-1 text-sm leading-relaxed text-slate-600">
-                                                We are enabling Horizon FI market by market to keep the experience stable and high quality.
+                                                We are validating performance and reliability before opening Horizon FI for everyone.
                                             </p>
                                         </div>
                                     </div>

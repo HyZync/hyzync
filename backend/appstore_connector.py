@@ -1,3 +1,4 @@
+import json
 import re
 import time
 from datetime import datetime
@@ -5,6 +6,27 @@ from urllib.parse import urlparse
 
 import pandas as pd
 import requests
+
+def estimate_appstore_pages(max_reviews, page_size=50, max_pages=None):
+    try:
+        requested_reviews = max(1, int(max_reviews or 1))
+    except (TypeError, ValueError):
+        requested_reviews = 1
+
+    try:
+        per_page = max(1, int(page_size or 50))
+    except (TypeError, ValueError):
+        per_page = 50
+
+    pages = max(1, (requested_reviews + per_page - 1) // per_page)
+    if max_pages is None:
+        return pages
+
+    try:
+        cap = max(1, int(max_pages))
+    except (TypeError, ValueError):
+        return pages
+    return min(pages, cap)
 
 class AppStoreReviewsScraper:
     def __init__(self):
@@ -131,12 +153,107 @@ class AppStoreReviewsScraper:
             reviews_list.append(review)
         return reviews_list
 
-    def get_reviews(self, app_id, country='us', page=1, sort='mostRecent'):
-        # Apple currently serves entries on /json without sortby; keep a fallback to
-        # old sortby path for compatibility across storefront changes.
+    def _repair_text(self, value):
+        text = str(value or '')
+        if not text:
+            return ''
+        try:
+            repaired = text.encode('latin1').decode('utf-8')
+            if repaired:
+                return repaired
+        except Exception:
+            pass
+        return text
+
+    def _parse_app_page_reviews(self, html):
+        match = re.search(
+            r'<script type="application/json" id="serialized-server-data">(.*?)</script>',
+            html,
+            re.DOTALL | re.IGNORECASE,
+        )
+        if not match:
+            return []
+
+        try:
+            payload = json.loads(match.group(1))
+        except Exception:
+            return []
+
+        try:
+            page_data = ((payload.get('data') or [{}])[0] or {}).get('data') or {}
+            shelf_mapping = page_data.get('shelfMapping') or {}
+            review_items = (shelf_mapping.get('allProductReviews') or {}).get('items') or []
+        except Exception:
+            return []
+
+        reviews = []
+        seen_ids = set()
+        for item in review_items:
+            review = item.get('review') if isinstance(item, dict) else None
+            if not isinstance(review, dict):
+                continue
+
+            review_id = str(review.get('id') or '').strip()
+            if review_id and review_id in seen_ids:
+                continue
+
+            content = self._repair_text(review.get('contents'))
+            if not content:
+                continue
+
+            try:
+                normalized_at = pd.to_datetime(review.get('date')).strftime('%Y-%m-%d %H:%M:%S')
+            except Exception:
+                normalized_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+            try:
+                score = int(review.get('rating') or 0)
+            except Exception:
+                score = 0
+
+            reviews.append(
+                {
+                    'content': content,
+                    'score': score,
+                    'userName': self._repair_text(review.get('reviewerName')) or 'Anonymous',
+                    'at': normalized_at,
+                    'appVersion': None,
+                }
+            )
+            if review_id:
+                seen_ids.add(review_id)
+        return reviews
+
+    def _fetch_reviews_from_app_page(self, app_id, country='us'):
+        normalized_country = str(country or 'us').strip().lower() or 'us'
         urls = [
-            f"{self.base_url}/{country}/rss/customerreviews/page={page}/id={app_id}/json",
-            f"{self.base_url}/{country}/rss/customerreviews/page={page}/id={app_id}/sortby={sort}/json",
+            f'https://apps.apple.com/{normalized_country}/app/id{app_id}',
+            f'https://apps.apple.com/us/app/id{app_id}',
+        ]
+        for url in urls:
+            try:
+                response = requests.get(url, headers=self.headers, timeout=20)
+                response.raise_for_status()
+                parsed = self._parse_app_page_reviews(response.text)
+                if parsed:
+                    return parsed
+            except Exception as e:
+                print(f"App page reviews error: {e}")
+        return []
+
+    def get_reviews(self, app_id, country='us', page=1, sort='mostRecent'):
+        normalized_country = str(country or 'us').strip().lower() or 'us'
+        normalized_sort = str(sort or 'mostRecent').strip() or 'mostRecent'
+
+        # Apple currently returns review entries most reliably from the
+        # countryless endpoint without the page segment. Keep additional
+        # storefront/page variants as fallbacks because the behavior shifts.
+        urls = [
+            f"{self.base_url}/rss/customerreviews/id={app_id}/sortBy={normalized_sort}/json",
+            f"{self.base_url}/{normalized_country}/rss/customerreviews/id={app_id}/sortBy={normalized_sort}/json",
+            f"{self.base_url}/rss/customerreviews/page={page}/id={app_id}/sortBy={normalized_sort}/json",
+            f"{self.base_url}/{normalized_country}/rss/customerreviews/page={page}/id={app_id}/json",
+            f"{self.base_url}/{normalized_country}/rss/customerreviews/page={page}/id={app_id}/sortby={normalized_sort}/json",
         ]
         for url in urls:
             try:
@@ -148,7 +265,7 @@ class AppStoreReviewsScraper:
                     return parsed
             except Exception as e:
                 print(f"Fetching reviews error: {e}")
-        return []
+        return self._fetch_reviews_from_app_page(app_id, normalized_country)
 
     def scrape_all_reviews(self, app_id, country='us', max_pages=10, delay=0.2):
         all_reviews = []
@@ -170,7 +287,18 @@ class AppStoreReviewsScraper:
 
 def fetch_appstore_reviews(app_identifier: str, country: str, max_pages: int = 10):
     scraper = AppStoreReviewsScraper()
-    app_id = scraper.get_app_id(app_identifier, country)
-    if app_id:
-        return scraper.scrape_all_reviews(app_id, country, max_pages)
+    normalized_country = str(country or 'us').strip().lower() or 'us'
+    fallback_countries = [normalized_country]
+    if normalized_country != 'us':
+        # Some apps resolve correctly but expose reviews only from the default
+        # storefront feed, so retry once against the US catalog before failing.
+        fallback_countries.append('us')
+
+    for lookup_country in fallback_countries:
+        app_id = scraper.get_app_id(app_identifier, lookup_country)
+        if not app_id:
+            continue
+        df = scraper.scrape_all_reviews(app_id, lookup_country, max_pages)
+        if df is not None and not df.empty:
+            return df
     return None

@@ -101,6 +101,39 @@ class FeedbackSelectionTests(unittest.TestCase):
         self.assertEqual(sum(int(row["total_reviews"]) for row in trends), 2)
         self.assertEqual({row["bucket"] for row in trends}, {"2026-03-01", "2026-03-03"})
 
+    def test_exact_feedback_ids_can_skip_already_analyzed_rows(self):
+        with patch("feedback_crm.get_db_connection", side_effect=lambda: _connect(self.db_path)):
+            rows = feedback_crm.fi_get_feedback_records_for_analysis(
+                1,
+                feedback_ids=[1, 2, 3],
+                include_analyzed=False,
+            )
+
+        self.assertEqual(rows, [])
+
+    def test_feedback_row_requires_reanalysis_for_missing_prompt_version(self):
+        row = {
+            "last_analyzed_at": "2026-03-10T10:00:00",
+            "metadata_json": """{"analysis":{"issue":"Feature","cleaning_version":"feedback_crm_clean_v2"}}""",
+        }
+        self.assertTrue(feedback_crm.fi_feedback_row_requires_reanalysis(row))
+
+    def test_feedback_row_reanalysis_not_required_for_current_versions(self):
+        row = {
+            "last_analyzed_at": "2026-03-10T10:00:00",
+            "metadata_json": (
+                '{"analysis":{"prompt_version":"feedback_crm_v5","cleaning_version":"feedback_crm_clean_v2"}}'
+            ),
+        }
+        self.assertFalse(feedback_crm.fi_feedback_row_requires_reanalysis(row))
+
+    def test_feedback_row_requires_reanalysis_for_unanalyzed_row(self):
+        row = {
+            "last_analyzed_at": None,
+            "metadata_json": "{}",
+        }
+        self.assertTrue(feedback_crm.fi_feedback_row_requires_reanalysis(row))
+
 
 if __name__ == "__main__":
     unittest.main()

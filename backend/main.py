@@ -22,6 +22,8 @@ import json
 import io
 import csv
 import uuid
+import math
+import re
 from datetime import datetime, timedelta
 import uvicorn
 import asyncio
@@ -34,7 +36,7 @@ from security import get_current_user, create_access_token
 from database import (
     init_database, create_user, verify_user, save_analysis,
     get_user_analyses, get_all_analyses_df, get_latest_analysis_df,
-    get_user_connectors, save_user_connector, delete_user_connector,
+    get_user_connectors, save_user_connector, delete_user_connector, purge_inactive_connectors,
     save_raw_reviews, get_raw_review_stats, get_latest_raw_reviews,
     create_workspace, get_user_workspaces, get_workspace_by_id, delete_workspace,
     # CRM functions
@@ -78,6 +80,7 @@ import feedback_crm
 import feedback_ingestion
 import fi_platform
 import llm_gateway
+from connector_utils import resolve_connector_create_settings
 from ai_tools.winback_tool import draft_winback_email
 from workspace_admin import (
     get_billing_dashboard,
@@ -266,7 +269,7 @@ async def get_advanced_analytics(analysis_id: int, current_user: dict = Depends(
     """
     from database import get_analysis_by_id
     
-    analysis = get_analysis_by_id(analysis_id, current_user["user_id"])
+    analysis = get_analysis_by_id(analysis_id, current_user["user_id"], current_user.get("tenant_id", 1))
     if not analysis:
         raise HTTPException(status_code=404, detail="Analysis not found")
     
@@ -417,9 +420,9 @@ class ConnectorRequest(BaseModel):
     name: Optional[str] = None
     config: Optional[Dict[str, Any]] = None
     workspace_id: Optional[int] = None
-    fetch_interval: Optional[str] = 'daily'
+    fetch_interval: Optional[str] = None
     analysis_interval: Optional[str] = None
-    max_reviews: Optional[int] = 100
+    max_reviews: Optional[int] = None
     connector_scope: Optional[str] = None
 
 class WorkspaceRequest(BaseModel):
@@ -494,7 +497,7 @@ class PreloadRequest(BaseModel):
     config: Optional[Dict[str, Any]] = None  # auth tokens, field mappings, URLs, etc.
 
 
-VALID_FETCH_INTERVALS = {"hourly", "daily", "weekly", "manual"}
+VALID_FETCH_INTERVALS = {"hourly", "daily", "weekly", "manual", "on_new"}
 VALID_CONNECTOR_TYPES = {
     "appstore",
     "playstore",
@@ -522,6 +525,90 @@ def _estimate_llm_cost(total_tokens: int, billing_enabled: bool) -> float:
         return 0.0
     tokens = max(0, int(total_tokens or 0))
     return round((tokens / 1000.0) * float(settings.LLM_BILLING_RATE_PER_1K_TOKENS), 6)
+
+
+_TRANSIENT_LLM_PROBE_MARKERS = (
+    "1033",
+    "530",
+    "502",
+    "503",
+    "524",
+    "bad gateway",
+    "service unavailable",
+    "gateway timed out",
+    "timed out",
+    "forcibly closed",
+    "connection reset",
+    "connection aborted",
+    "protocolerror",
+)
+
+_STRICT_LLM_ANALYSIS = bool(getattr(settings, "STRICT_LLM_ANALYSIS", True))
+_STRICT_ANALYSIS_FAIL_ON_UNRESOLVED = bool(
+    getattr(settings, "STRICT_ANALYSIS_FAIL_ON_UNRESOLVED", True)
+)
+
+
+def _is_transient_llm_probe_error(error: Any) -> bool:
+    text = str(error or "").lower()
+    if not text:
+        return False
+    return any(marker in text for marker in _TRANSIENT_LLM_PROBE_MARKERS)
+
+
+def _check_llm_connectivity_with_retries(
+    timeout_seconds: Optional[int] = None,
+    max_attempts: int = 3,
+    force_refresh: bool = False,
+) -> Dict[str, Any]:
+    timeout_cap = max(
+        10,
+        int(getattr(settings, "OLLAMA_PREFLIGHT_TIMEOUT_CAP_SECONDS", 45) or 45),
+    )
+    resolved_timeout = max(
+        6,
+        min(
+            int(timeout_seconds or getattr(settings, "OLLAMA_PREFLIGHT_TIMEOUT_SECONDS", 30) or 30),
+            timeout_cap,
+        ),
+    )
+    attempts = max(1, int(max_attempts or 1))
+    last_health: Dict[str, Any] = {}
+
+    for attempt_idx in range(attempts):
+        refresh_now = bool(force_refresh or attempt_idx > 0)
+        health = processor.check_llm_connectivity(
+            timeout_seconds=resolved_timeout,
+            force_refresh=refresh_now,
+        )
+        if isinstance(health, dict):
+            last_health = health
+        else:
+            last_health = {"ok": False, "error": "LLM health probe returned an invalid payload."}
+
+        if last_health.get("ok"):
+            return last_health
+
+        if attempt_idx >= attempts - 1:
+            break
+
+        error_text = str(last_health.get("error") or "")
+        if not _is_transient_llm_probe_error(error_text):
+            break
+
+        retry_delay_seconds = min(4.0, 1.0 + float(attempt_idx))
+        logger.warning(
+            "[LLM Probe] Connectivity probe failed (%s/%s): %s. Retrying in %.1fs.",
+            attempt_idx + 1,
+            attempts,
+            error_text or "unknown error",
+            retry_delay_seconds,
+        )
+        time.sleep(retry_delay_seconds)
+
+    if last_health:
+        return last_health
+    return {"ok": False, "error": "LLM health probe returned no result."}
 
 
 def _build_llm_tool_modes(prefs: Dict[str, Any], health: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
@@ -625,6 +712,101 @@ def _require_fi_connector_access(connector_id: int, current_user: dict) -> Dict[
         raise HTTPException(status_code=404, detail="Connector not found")
     return source
 
+
+def _standardize_preview_reviews_df(df: Optional[pd.DataFrame]) -> Optional[pd.DataFrame]:
+    """Normalize fetched connector rows into the review shape used by Horizon preview."""
+    if df is None or df.empty:
+        return None
+
+    normalized = df.copy()
+
+    if "reviewed_at" in normalized.columns and "at" not in normalized.columns:
+        normalized["at"] = normalized["reviewed_at"]
+    if "author" in normalized.columns and "userName" not in normalized.columns:
+        normalized["userName"] = normalized["author"]
+
+    if "score" not in normalized.columns:
+        for alt in ("rating", "stars", "satisfaction"):
+            if alt in normalized.columns:
+                normalized["score"] = normalized[alt]
+                break
+        else:
+            normalized["score"] = 3
+
+    if "content" not in normalized.columns:
+        for alt in ("text", "body", "review", "message", "feedback", "comment", "description", "note"):
+            if alt in normalized.columns:
+                normalized["content"] = normalized[alt]
+                break
+
+    if "at" not in normalized.columns:
+        for alt in ("date", "reviewed_at", "timestamp", "created_at", "updated_at", "submitted_at"):
+            if alt in normalized.columns:
+                normalized["at"] = normalized[alt]
+                break
+        else:
+            normalized["at"] = datetime.now().isoformat()
+
+    if "userName" not in normalized.columns:
+        for alt in ("author", "name", "user", "username", "reviewer", "reviewer_name", "email"):
+            if alt in normalized.columns:
+                normalized["userName"] = normalized[alt]
+                break
+
+    if "content" not in normalized.columns:
+        return None
+
+    normalized["content"] = normalized["content"].astype(str)
+    normalized = normalized[normalized["content"].str.strip().str.len() > 2]
+    if normalized.empty:
+        return None
+
+    return normalized
+
+
+def _persist_connector_preview_reviews(
+    *,
+    user_id: int,
+    tenant_id: int,
+    source_type: str,
+    identifier: str,
+    workspace_id: Optional[int],
+    df: Optional[pd.DataFrame],
+) -> Dict[str, Any]:
+    if df is None or df.empty:
+        return {"status": "error", "message": "No data found or fetch failed for this source."}
+    standardized = _standardize_preview_reviews_df(df)
+    if standardized is None or standardized.empty:
+        return {"status": "error", "message": "No valid review content found after filtering."}
+
+    reviews_payload = standardized.to_dict("records")
+    added, skipped = save_raw_reviews(
+        user_id,
+        tenant_id,
+        source_type,
+        identifier,
+        reviews_payload,
+        workspace_id=workspace_id,
+    )
+    stats = get_raw_review_stats(
+        user_id,
+        tenant_id,
+        source_type,
+        identifier,
+        workspace_id=workspace_id,
+    )
+    preview = _df_to_review_list(standardized, source_type.replace("_", " ").title()) or {"reviews": []}
+    return {
+        "status": "success",
+        "added": added,
+        "skipped": skipped,
+        "stats": stats,
+        "count": len(preview.get("reviews", [])),
+        "reviews": preview.get("reviews", []),
+        "source": preview.get("source"),
+        "metadata": preview.get("metadata", {}),
+    }
+
 # --- Auth Endpoints ---
 
 @app.post("/register")
@@ -726,6 +908,10 @@ async def fetch_user_connectors(
     connector_scope: Optional[str] = "workspace",
     current_user: dict = Depends(get_current_user)
 ):
+    purge_inactive_connectors(
+        current_user["tenant_id"],
+        user_id=current_user["user_id"],
+    )
     # Now leverages cxm_sources under the hood
     connectors = get_user_connectors(
         current_user["user_id"],
@@ -750,15 +936,14 @@ async def add_user_connector(
             detail=f"Unsupported connector_type. Use one of: {', '.join(sorted(VALID_CONNECTOR_TYPES))}",
         )
 
-    # Ensure count is in the config for the scheduler to pick up
-    cfg = request.config or {}
-    cfg['count'] = request.max_reviews
-    fetch_interval = (request.fetch_interval or "daily").strip().lower()
-    if fetch_interval not in VALID_FETCH_INTERVALS:
-        fetch_interval = "daily"
-    analysis_interval = (request.analysis_interval or fetch_interval).strip().lower()
-    if analysis_interval not in VALID_FETCH_INTERVALS:
-        analysis_interval = fetch_interval if fetch_interval != "manual" else "manual"
+    cfg, fetch_interval, analysis_interval, _max_reviews = resolve_connector_create_settings(
+        request.config,
+        fetch_interval=request.fetch_interval,
+        analysis_interval=request.analysis_interval,
+        max_reviews=request.max_reviews,
+        default_fetch_interval="daily",
+        follow_fetch_for_analysis=True,
+    )
     
     source_id = save_user_connector(
         current_user["user_id"],
@@ -785,9 +970,9 @@ async def remove_user_connector(
     current_user: dict = Depends(get_current_user)
 ):
     _require_connector_scope(connector_id, current_user, "workspace")
-    delete_user_connector(connector_id, current_user["tenant_id"])
+    cleanup = delete_user_connector(connector_id, current_user["tenant_id"])
     cxm_scheduler.remove_source_job(connector_id)
-    return {"status": "success", "message": "Connector removed"}
+    return {"status": "success", "message": "Connector removed", "cleanup": cleanup}
 
 
 @app.patch("/api/user/connectors/{connector_id}")
@@ -813,10 +998,62 @@ async def patch_user_connector(
     return {"status": "success", "connector": updated}
 
 
+@app.post("/api/user/connectors/{connector_id}/fetch")
+async def fetch_user_connector_preview(
+    connector_id: int,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Fetch preview reviews for a saved workspace connector using the connector's
+    real stored configuration instead of the masked config echoed to the UI.
+    """
+    source = _require_connector_scope(connector_id, current_user, "workspace")
+    source_type = str(source.get("source_type") or "").strip().lower()
+    config = source.get("config") or {}
+
+    if source_type == "csv":
+        return {
+            "status": "error",
+            "message": "CSV connectors require a file upload in the workspace before previewing data.",
+        }
+
+    if source_type == "webhook" and not any(config.get(key) for key in ("api_url", "url", "endpoint")):
+        return {
+            "status": "error",
+            "message": "Webhook connectors wait for inbound events and cannot be fetched manually without a pull endpoint.",
+        }
+
+    try:
+        count = max(1, min(int(config.get("count") or config.get("max_reviews") or 200), 5000))
+    except (TypeError, ValueError):
+        count = 200
+    country = str(config.get("country") or "us").strip().lower() or "us"
+
+    try:
+        reviews = await asyncio.to_thread(cxm_scheduler._fetch_reviews_for_source, source, count, country)
+    except Exception as e:
+        logger.exception("[Connector Preview] Fetch failed for connector %s", connector_id)
+        return {"status": "error", "message": f"Fetch failed: {e}"}
+
+    df = pd.DataFrame(reviews) if reviews else None
+    return _persist_connector_preview_reviews(
+        user_id=current_user["user_id"],
+        tenant_id=current_user["tenant_id"],
+        source_type=source.get("source_type") or "",
+        identifier=source.get("identifier") or "",
+        workspace_id=source.get("workspace_id"),
+        df=df,
+    )
+
+
 # --- Feedback CRM Connector Endpoints ---
 
 @app.get("/api/fi/connectors")
 async def fi_fetch_connectors(current_user: dict = Depends(get_current_user)):
+    purge_inactive_connectors(
+        current_user["tenant_id"],
+        user_id=current_user["user_id"],
+    )
     connectors = get_user_connectors(
         current_user["user_id"],
         current_user["tenant_id"],
@@ -841,14 +1078,14 @@ async def fi_add_connector(request: ConnectorRequest, current_user: dict = Depen
             detail=f"Unsupported connector_type. Use one of: {', '.join(sorted(VALID_CONNECTOR_TYPES))}",
         )
 
-    cfg = request.config or {}
-    cfg['count'] = request.max_reviews
-    fetch_interval = (request.fetch_interval or "manual").strip().lower()
-    if fetch_interval not in VALID_FETCH_INTERVALS:
-        fetch_interval = "manual"
-    analysis_interval = (request.analysis_interval or "manual").strip().lower()
-    if analysis_interval not in VALID_FETCH_INTERVALS:
-        analysis_interval = "manual"
+    cfg, fetch_interval, analysis_interval, _max_reviews = resolve_connector_create_settings(
+        request.config,
+        fetch_interval=request.fetch_interval,
+        analysis_interval=request.analysis_interval,
+        max_reviews=request.max_reviews,
+        default_fetch_interval="manual",
+        follow_fetch_for_analysis=False,
+    )
 
     source_id = save_user_connector(
         current_user["user_id"],
@@ -872,9 +1109,9 @@ async def fi_add_connector(request: ConnectorRequest, current_user: dict = Depen
 @app.delete("/api/fi/connectors/{connector_id}")
 async def fi_remove_connector(connector_id: int, current_user: dict = Depends(get_current_user)):
     _require_connector_scope(connector_id, current_user, "feedback_crm")
-    delete_user_connector(connector_id, current_user["tenant_id"])
+    cleanup = delete_user_connector(connector_id, current_user["tenant_id"])
     cxm_scheduler.remove_source_job(connector_id)
-    return {"status": "success", "message": "CRM connector removed"}
+    return {"status": "success", "message": "CRM connector removed", "cleanup": cleanup}
 
 # --- Workspace Endpoints ---
 
@@ -1093,8 +1330,8 @@ async def preload_source_data(
     try:
         # ── App Store ──────────────────────────────────────────────────────────────
         if request.source_type == 'appstore':
-            from appstore_connector import fetch_appstore_reviews
-            pages = max(1, request.max_reviews // 50)
+            from appstore_connector import estimate_appstore_pages, fetch_appstore_reviews
+            pages = estimate_appstore_pages(request.max_reviews)
             df = fetch_appstore_reviews(request.identifier, request.country, pages)
 
         # ── Play Store ─────────────────────────────────────────────────────────────
@@ -1423,6 +1660,53 @@ def _safe_progress_value(value: Any) -> int:
     return max(0, min(100, parsed))
 
 
+def _sanitize_task_payload(value: Any) -> Any:
+    """
+    Make in-memory task payloads safe to return through JSON APIs.
+
+    Some analysis results still carry runtime-only helper objects such as
+    deduplication registries inside `_cleaning_options`. Those objects are
+    useful while processing, but they must never reach the polling endpoint.
+    """
+    if value is None or isinstance(value, (str, int, bool)):
+        return value
+
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+
+    if isinstance(value, datetime):
+        return value.isoformat()
+
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+
+    if isinstance(value, dict):
+        sanitized: Dict[str, Any] = {}
+        for key, item in value.items():
+            key_str = str(key)
+            if key_str == "_cleaning_options":
+                continue
+            sanitized[key_str] = _sanitize_task_payload(item)
+        return sanitized
+
+    if isinstance(value, (list, tuple, set)):
+        return [_sanitize_task_payload(item) for item in value]
+
+    if hasattr(value, "tolist"):
+        try:
+            return _sanitize_task_payload(value.tolist())
+        except Exception:
+            pass
+
+    if hasattr(value, "isoformat"):
+        try:
+            return value.isoformat()
+        except Exception:
+            pass
+
+    return str(value)
+
+
 def _set_task(task_id: str, data: dict, append_log: Optional[str] = None):
     """
     Thread-safe task state update.
@@ -1651,7 +1935,21 @@ async def run_processing_background(task_id: str, request: ProcessRequest):
                 except (ValueError, TypeError):
                     r["score"] = 3
 
-        # Clean the reviews first
+        requested_cleaning_mode = str(getattr(request, "cleaning_mode", "magic") or "magic").strip().lower()
+        manual_filter_tokens = {
+            token.strip().lower()
+            for token in str(getattr(request, "manual_filters", "") or "").split(",")
+            if token and token.strip()
+        }
+        use_magic_cleaning = requested_cleaning_mode != "manual"
+        default_cleaning_options = {
+            "token_efficiency": use_magic_cleaning,
+            "magic_clean": use_magic_cleaning,
+            "language_focus": "english_only" in manual_filter_tokens,
+            "html_shield": use_magic_cleaning or ("strip_html" in manual_filter_tokens),
+        }
+
+        # Clean the reviews first (same resilient pre-clean pipeline used by Feedback CRM)
         log_debug(f"Cleaning {len(request.reviews)} reviews...")
         cleaned_reviews = []
         total_reviews = len(request.reviews)
@@ -1679,11 +1977,30 @@ async def run_processing_background(task_id: str, request: ProcessRequest):
 
             # Normalize: support 'content', 'text', 'body', or 'review' field names
             raw_text = r.get("content") or r.get("text") or r.get("body") or r.get("review", "")
-            cleaned = processor.clean_review_text(raw_text)
-            if len(cleaned.strip()) < processor.MIN_REVIEW_CHAR_LENGTH:
+            try:
+                rating_value = int(float(r.get("score", r.get("rating", 3)) or 3))
+            except Exception:
+                rating_value = 3
+            cleaning_options = dict(default_cleaning_options)
+            adv = processor.advanced_clean_review(raw_text, rating=rating_value, options=cleaning_options)
+            cleaned = adv.get("cleaned_text", "")
+            clean_flags = list(adv.get("flags", []) or [])
+            if not cleaned and "non_english_filtered" not in clean_flags:
+                cleaned = processor.clean_review_text(raw_text)
+            if len(str(cleaned or "").strip()) < processor.MIN_REVIEW_CHAR_LENGTH and "non_english_filtered" not in clean_flags:
                 cleaned = str(raw_text or "").strip()[:processor.MAX_PROMPT_REVIEW_CHARS] or "No text provided"
-            score = r.get("score", r.get("rating", 3))
-            cleaned_reviews.append({**r, "content": cleaned, "score": score})
+            cleaned_reviews.append(
+                {
+                    **r,
+                    "content": str(raw_text or ""),
+                    "score": rating_value,
+                    "_precleaned_content": cleaned,
+                    "_preclean_noise_score": float(adv.get("noise_score", 0.0) or 0.0),
+                    "_preclean_flags": clean_flags,
+                    "_preclean_token_estimate": int(adv.get("token_estimate", 0) or 0),
+                    "_cleaning_options": cleaning_options,
+                }
+            )
 
         log_debug(f"Cleaning complete. Prepared {len(cleaned_reviews)} reviews for analysis.")
 
@@ -1761,7 +2078,12 @@ async def run_processing_background(task_id: str, request: ProcessRequest):
                 patch["context_checkpoint"] = meta.get("context_checkpoint")
             _set_task(task_id, patch, append_log=msg)
 
-        llm_health = await asyncio.to_thread(processor.check_llm_connectivity)
+        llm_health = await asyncio.to_thread(
+            _check_llm_connectivity_with_retries,
+            max(15, int(getattr(settings, "OLLAMA_PREFLIGHT_TIMEOUT_SECONDS", 30) or 30)),
+            2,
+            False,
+        )
         if not llm_health.get("ok"):
             warn_msg = (
                 "LLM tunnel health probe is unstable. Continuing with analysis; "
@@ -1792,30 +2114,6 @@ async def run_processing_background(task_id: str, request: ProcessRequest):
             pause_event,
             "bulk_survey" if request.nps_mode else "workspace",
         )
-
-        if not results:
-            fallback_msg = (
-                "Live AI analysis returned no results. Switching to standby analysis..."
-            )
-            _set_task(
-                task_id,
-                {
-                    "status": "analyzing",
-                    "progress": 20,
-                    "message": fallback_msg,
-                    "processed_reviews": 0,
-                    "total_reviews": len(cleaned_reviews),
-                    "fetched_reviews": fetched_reviews,
-                    "in_flight_reviews": len(cleaned_reviews),
-                },
-                append_log=fallback_msg,
-            )
-            results = await asyncio.to_thread(
-                processor.run_fallback_analysis_batch,
-                cleaned_reviews,
-                progress_cb,
-                "analysis_empty_fallback",
-            )
 
         if stop_event.is_set():
             # Filter out None results (not yet processed)
@@ -1851,6 +2149,30 @@ async def run_processing_background(task_id: str, request: ProcessRequest):
         unresolved_reviews = sum(1 for r in results if r.get("_meta_error"))
         dropped_reviews = max(0, fetched_reviews - analyzed_reviews)
         coverage_pct = round((analyzed_reviews / max(fetched_reviews, 1)) * 100, 2)
+        if _STRICT_LLM_ANALYSIS and _STRICT_ANALYSIS_FAIL_ON_UNRESOLVED and unresolved_reviews > 0:
+            strict_msg = (
+                f"Strict analysis failed: {unresolved_reviews}/{fetched_reviews} reviews returned unresolved "
+                "model outputs after retries. No heuristic fallback was applied."
+            )
+            _set_task(
+                task_id,
+                {
+                    "status": "failed",
+                    "progress": 100,
+                    "message": strict_msg,
+                    "processed_reviews": analyzed_reviews,
+                    "total_reviews": fetched_reviews,
+                    "fetched_reviews": fetched_reviews,
+                    "analyzed_reviews": analyzed_reviews,
+                    "fallback_reviews": fallback_reviews,
+                    "unresolved_reviews": unresolved_reviews,
+                    "dropped_reviews": dropped_reviews,
+                    "coverage_pct": coverage_pct,
+                    "_completed_at": time.time(),
+                },
+                append_log=strict_msg,
+            )
+            return
         summary_msg = (
             f"Analysis summary: fetched={fetched_reviews}, analyzed={analyzed_reviews}, "
             f"fallback={fallback_reviews}, unresolved={unresolved_reviews}, "
@@ -1901,13 +2223,51 @@ async def run_processing_background(task_id: str, request: ProcessRequest):
         )
 
         # Comprehensive Analytics (OFFLOADED TO THREAD)
-        analytics = await asyncio.to_thread(
-            processor.get_comprehensive_analytics,
-            analysis_df,
-            request.arpu,
-            request.vertical,
-            request.audience,
-        )
+        # Guard this phase with a timeout so tasks do not remain stuck at 92%.
+        try:
+            analytics = await asyncio.wait_for(
+                asyncio.to_thread(
+                    processor.get_comprehensive_analytics,
+                    analysis_df,
+                    request.arpu,
+                    request.vertical,
+                    request.audience,
+                ),
+                timeout=150,
+            )
+        except asyncio.TimeoutError:
+            log_debug(f"[TASK {task_id}] Comprehensive analytics timed out during finalization. Falling back to baseline summary.")
+            sentiment_counts = {"positive": 0, "neutral": 0, "negative": 0}
+            for row in results:
+                sentiment_key = str(row.get("sentiment", "")).strip().lower()
+                if sentiment_key in sentiment_counts:
+                    sentiment_counts[sentiment_key] += 1
+            analytics = {
+                "healthMetrics": {
+                    "nps_score": 0,
+                    "csat_score": 0,
+                    "ces_score": 0,
+                    "health_score": 0,
+                    "retention_risk_pct": 0,
+                    "total_reviews": analyzed_reviews,
+                },
+                "sentimentDistribution": sentiment_counts,
+                "totalPositive": sentiment_counts["positive"],
+                "totalNeutral": sentiment_counts["neutral"],
+                "totalNegative": sentiment_counts["negative"],
+                "totalReviews": analyzed_reviews,
+                "nps": 0,
+                "csat": 0,
+                "revenueAtRisk": 0,
+                "thematic": {},
+                "fixNowPriorities": [],
+                "recommendations": [],
+                "executiveSummary": {
+                    "health": "Analysis completed, but strategic synthesis timed out. Baseline metrics remain available."
+                },
+                "vertical": request.vertical,
+                "audience": request.audience,
+            }
         if not isinstance(analytics, dict):
             analytics = {}
         analytics["analysisCounts"] = analysis_counts
@@ -1915,12 +2275,27 @@ async def run_processing_background(task_id: str, request: ProcessRequest):
 
         # --- DEFINE INSIGHTS SYNTHESIS LAYER ---
         # If we have vague labels (Other, UX, etc.), use LLM to synthesize definitive ones
+        _set_task(
+            task_id,
+            {
+                "status": "finalizing",
+                "progress": 96,
+                "message": "Finalizing strategic output...",
+                "processed_reviews": analyzed_reviews,
+                "total_reviews": len(cleaned_reviews),
+            },
+        )
         try:
             from synthesis_module import batch_synthesize_labels
 
             # processor.get_comprehensive_analytics returns data in 'thematic' key
             if "thematic" in analytics:
-                analytics["thematic"] = batch_synthesize_labels(analytics["thematic"], results, request.vertical)
+                analytics["thematic"] = await asyncio.wait_for(
+                    asyncio.to_thread(batch_synthesize_labels, analytics["thematic"], results, request.vertical),
+                    timeout=35,
+                )
+        except asyncio.TimeoutError:
+            log_debug(f"[TASK {task_id}] Thematic synthesis timed out. Continuing with unsynthesized labels.")
         except Exception as e:
             log_debug(f"Synthesis Layer failed in fresh analysis: {e}")
             print(f"[ERROR] Synthesis Layer failed: {e}")
@@ -2082,7 +2457,7 @@ async def run_analysis_background(task_id: str, request: AnalysisRequest):
         elif request.source_type == 'playstore':
             df = fetch_raw_playstore_reviews(request.identifier, request.country, request.max_reviews)
         elif request.source_type == 'appstore':
-            pages = max(1, request.max_reviews // 50)
+            pages = math.ceil(max(1, request.max_reviews) / 50)
             df = fetch_appstore_reviews(request.identifier, request.country, pages)
 
         if df is None or df.empty:
@@ -2148,7 +2523,12 @@ async def run_analysis_background(task_id: str, request: AnalysisRequest):
                 patch["context_checkpoint"] = meta.get("context_checkpoint")
             _set_task(task_id, patch, append_log=msg)
 
-        llm_health = await asyncio.to_thread(processor.check_llm_connectivity)
+        llm_health = await asyncio.to_thread(
+            _check_llm_connectivity_with_retries,
+            max(15, int(getattr(settings, "OLLAMA_PREFLIGHT_TIMEOUT_SECONDS", 30) or 30)),
+            2,
+            False,
+        )
         if not llm_health.get("ok"):
             warn_msg = (
                 "LLM tunnel health probe is unstable. Continuing with analysis; "
@@ -2181,30 +2561,6 @@ async def run_analysis_background(task_id: str, request: AnalysisRequest):
         )
 
         if not results:
-            fallback_msg = (
-                "Live AI analysis returned no results. Switching to standby analysis..."
-            )
-            _set_task(
-                task_id,
-                {
-                    "status": "analyzing",
-                    "progress": 25,
-                    "message": fallback_msg,
-                    "processed_reviews": 0,
-                    "total_reviews": len(reviews_list),
-                    "fetched_reviews": fetched_reviews,
-                    "in_flight_reviews": len(reviews_list),
-                },
-                append_log=fallback_msg,
-            )
-            results = await asyncio.to_thread(
-                processor.run_fallback_analysis_batch,
-                reviews_list,
-                progress_cb,
-                "analysis_empty_fallback",
-            )
-        
-        if not results:
             _set_task(task_id, {"status": "failed", "message": "LLM analysis failed", "_completed_at": time.time()})
             return
 
@@ -2214,6 +2570,30 @@ async def run_analysis_background(task_id: str, request: AnalysisRequest):
         unresolved_reviews = sum(1 for r in results if r.get("_meta_error"))
         dropped_reviews = max(0, fetched_reviews - analyzed_reviews)
         coverage_pct = round((analyzed_reviews / max(fetched_reviews, 1)) * 100, 2)
+        if _STRICT_LLM_ANALYSIS and _STRICT_ANALYSIS_FAIL_ON_UNRESOLVED and unresolved_reviews > 0:
+            strict_msg = (
+                f"Strict analysis failed: {unresolved_reviews}/{fetched_reviews} reviews returned unresolved "
+                "model outputs after retries. No heuristic fallback was applied."
+            )
+            _set_task(
+                task_id,
+                {
+                    "status": "failed",
+                    "progress": 100,
+                    "message": strict_msg,
+                    "processed_reviews": analyzed_reviews,
+                    "total_reviews": fetched_reviews,
+                    "fetched_reviews": fetched_reviews,
+                    "analyzed_reviews": analyzed_reviews,
+                    "fallback_reviews": fallback_reviews,
+                    "unresolved_reviews": unresolved_reviews,
+                    "dropped_reviews": dropped_reviews,
+                    "coverage_pct": coverage_pct,
+                    "_completed_at": time.time(),
+                },
+                append_log=strict_msg,
+            )
+            return
         summary_msg = (
             f"Analysis summary: fetched={fetched_reviews}, analyzed={analyzed_reviews}, "
             f"fallback={fallback_reviews}, unresolved={unresolved_reviews}, "
@@ -2340,7 +2720,7 @@ async def fetch_reviews_only(request: AnalysisRequest):
             )
             source_name = "Google Play"
         elif request.source_type == 'appstore':
-            pages = max(1, request.max_reviews // 50)
+            pages = math.ceil(max(1, request.max_reviews) / 50)
             df = await asyncio.to_thread(
                 fetch_appstore_reviews, request.identifier, request.country, pages
             )
@@ -2680,7 +3060,7 @@ async def get_task_status(task_id: str):
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     return JSONResponse(
-        content=task,
+        content=_sanitize_task_payload(task),
         headers={
             "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
             "Pragma": "no-cache",
@@ -3209,6 +3589,7 @@ async def crm_import_profiles(req: CRMImportRequest, current_user: dict = Depend
 
 @app.get("/api/crm/profiles")
 async def crm_list_profiles(
+    workspace_id: Optional[int] = None,
     search: str = '',
     segment: str = '',
     current_user: dict = Depends(get_current_user)
@@ -3217,7 +3598,13 @@ async def crm_list_profiles(
     try:
         user_id = current_user["user_id"]
         tenant_id = current_user["tenant_id"]
-        profiles = crm_get_profiles(user_id, tenant_id, search, segment)
+        profiles = crm_get_profiles(
+            user_id,
+            tenant_id,
+            workspace_id=workspace_id,
+            search=search,
+            segment=segment,
+        )
         return {"profiles": profiles, "total": len(profiles)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -3714,7 +4101,7 @@ class CxmSourceRequest(BaseModel):
     source_type: str          # playstore | appstore | trustpilot | csv | survey
     identifier: str           # package name, domain, survey_id, etc.
     display_name: str = ''
-    fetch_interval: str = 'daily'   # hourly | daily | weekly | manual
+    fetch_interval: str = 'daily'   # hourly | daily | weekly | on_new | manual
     config: Optional[Dict[str, Any]] = {}
 
 class CxmSourceUpdateRequest(BaseModel):
@@ -3778,7 +4165,7 @@ async def cxm_add_source(req: CxmSourceRequest, background_tasks: BackgroundTask
             raise HTTPException(status_code=422, detail=f"Invalid source_type. Must be one of: {', '.join(sorted(VALID_SOURCE_TYPES))}")
 
         # Validate fetch_interval
-        VALID_INTERVALS = {'hourly', 'daily', 'weekly', 'manual'}
+        VALID_INTERVALS = {'hourly', 'daily', 'weekly', 'manual', 'on_new'}
         if req.fetch_interval not in VALID_INTERVALS:
             raise HTTPException(status_code=422, detail=f"Invalid fetch_interval. Must be one of: {', '.join(sorted(VALID_INTERVALS))}")
 
@@ -4143,7 +4530,7 @@ async def cxm_health(current_user: dict = Depends(get_current_user)):
 
     # LLM reachability (quick ping)
     llm_ok = False
-    llm_model = os.environ.get("OLLAMA_MODEL", "mistral")
+    llm_model = os.environ.get("OLLAMA_MODEL", "phi4-mini")
     try:
         r = req_lib.get(f"{os.environ.get('OLLAMA_BASE_URL', 'http://localhost:11434')}/api/tags", timeout=3)
         llm_ok = r.status_code == 200
@@ -4328,6 +4715,13 @@ class FIGenerateResponseRequest(BaseModel):
     response_type: str = "support_reply"
 
 
+class FIRetentionIntelligenceRequest(BaseModel):
+    feedback: str = ""
+    feedback_id: Optional[int] = None
+    customer_identifier: Optional[str] = None
+    run_rescue: bool = True
+
+
 class FIKnowledgeBaseOfferCreate(BaseModel):
     name: str
     segment: str = "all"
@@ -4405,6 +4799,7 @@ class FIAnalyzeRequest(BaseModel):
     limit: Optional[int] = None
     offset: Optional[int] = None
     vertical: str = "generic"
+    force_reanalyze: bool = False
 
 class FIConnectorFetchRequest(BaseModel):
     connector_ids: List[int]
@@ -4612,11 +5007,16 @@ async def fi_set_connector_interval(
         )
 
     _require_fi_connector_access(connector_id, current_user)
+    update_payload: Dict[str, Any] = {"fetch_interval": interval}
+    # "on_new" mode is designed to fetch and analyze together for CRM sources.
+    if interval == "on_new":
+        update_payload["analysis_interval"] = "on_new"
+
     ok = cxm_update_source(
         connector_id,
         current_user["user_id"],
         current_user["tenant_id"],
-        fetch_interval=interval,
+        **update_payload,
     )
     if not ok:
         raise HTTPException(status_code=404, detail="Connector not found")
@@ -4630,6 +5030,7 @@ async def fi_set_connector_interval(
         "status": "success",
         "connector_id": connector_id,
         "fetch_interval": interval,
+        "analysis_interval": "on_new" if interval == "on_new" else None,
     }
 
 
@@ -4885,6 +5286,8 @@ async def fi_analysis_summary(
             "total_reviews": 0,
             "avg_sentiment": 0,
             "avg_churn": 0,
+            "avg_action_confidence": 0.0,
+            "avg_business_impact_score": 0.0,
             "positive_count": 0,
             "neutral_count": 0,
             "negative_count": 0,
@@ -4893,7 +5296,10 @@ async def fi_analysis_summary(
             "low_churn": 0,
             "top_themes": [],
             "top_pain_points": [],
+            "top_actionable_issues": [],
             "churn_intent_clusters": [],
+            "recurring_issue_patterns": [],
+            "recurring_issue_memory": [],
             "user_segments": [],
             "growth_opportunities": [],
             "main_problem_to_fix": {
@@ -5040,6 +5446,7 @@ async def fi_feedback_list(
     rating_values: Optional[str] = None,
     sentiment: Optional[str] = None,
     source: Optional[str] = None,
+    source_type: Optional[str] = None,
     issue_id: Optional[int] = None,
     customer_id: Optional[int] = None,
     search: Optional[str] = None,
@@ -5049,6 +5456,10 @@ async def fi_feedback_list(
     offset: int = 0,
     current_user: dict = Depends(get_current_user),
 ):
+    purge_inactive_connectors(
+        current_user["tenant_id"],
+        user_id=current_user["user_id"],
+    )
     return feedback_crm.fi_list_feedback(
         current_user["tenant_id"],
         status=status,
@@ -5057,6 +5468,7 @@ async def fi_feedback_list(
         rating_values=_parse_rating_values_param(rating_values),
         sentiment=sentiment,
         source=source,
+        source_type=source_type,
         issue_id=issue_id, customer_id=customer_id, search=search,
         start_date=start_date, end_date=end_date,
         limit=max(1, min(limit, 5000)), offset=max(0, offset),
@@ -5125,6 +5537,10 @@ async def fi_issues_list(
     offset: int = 0,
     current_user: dict = Depends(get_current_user),
 ):
+    purge_inactive_connectors(
+        current_user["tenant_id"],
+        user_id=current_user["user_id"],
+    )
     return feedback_crm.fi_list_issues(
         current_user["tenant_id"], status=status, sort_by=sort_by,
         limit=limit, offset=offset,
@@ -5167,6 +5583,10 @@ async def fi_customers_list(
     offset: int = 0,
     current_user: dict = Depends(get_current_user),
 ):
+    purge_inactive_connectors(
+        current_user["tenant_id"],
+        user_id=current_user["user_id"],
+    )
     return feedback_crm.fi_list_customers(
         current_user["tenant_id"], search=search, sentiment=sentiment,
         limit=limit, offset=offset,
@@ -5191,6 +5611,10 @@ async def fi_customer_timeline(customer_id: int, current_user: dict = Depends(ge
 
 @app.get("/api/fi/dashboard")
 async def fi_dashboard(current_user: dict = Depends(get_current_user)):
+    purge_inactive_connectors(
+        current_user["tenant_id"],
+        user_id=current_user["user_id"],
+    )
     return feedback_crm.fi_product_health(current_user["tenant_id"])
 
 
@@ -5220,18 +5644,23 @@ def run_fi_analysis_background(
     limit: Optional[int],
     offset: Optional[int],
     vertical: str,
+    force_reanalyze: bool = False,
 ):
     stop_event = threading.Event()
     pause_event = threading.Event()
     analysis_run_id: Optional[int] = None
+    already_analyzed_count = 0
+    reanalyzed_outdated_count = 0
+    selected_reviews_count = 0
 
     with _tasks_lock:
         task_controls[task_id] = {'stop': stop_event, 'pause': pause_event}
 
     try:
-        feedback_rows = feedback_crm.fi_get_feedback_records_for_analysis(
+        selected_rows = feedback_crm.fi_get_feedback_records_for_analysis(
             tenant_id,
             feedback_ids=feedback_ids,
+            include_analyzed=True,
             source=source,
             source_ids=source_ids,
             start_date=start_date,
@@ -5244,6 +5673,24 @@ def run_fi_analysis_background(
             limit=limit,
             offset=offset,
         )
+        selected_reviews_count = len(selected_rows)
+        if force_reanalyze:
+            feedback_rows = selected_rows
+            already_analyzed_count = 0
+            reanalyzed_outdated_count = 0
+        else:
+            feedback_rows = []
+            already_analyzed_count = 0
+            reanalyzed_outdated_count = 0
+            for row in selected_rows:
+                if not row.get("last_analyzed_at"):
+                    feedback_rows.append(row)
+                    continue
+                if feedback_crm.fi_feedback_row_requires_reanalysis(row):
+                    feedback_rows.append(row)
+                    reanalyzed_outdated_count += 1
+                    continue
+                already_analyzed_count += 1
         total_reviews = len(feedback_rows)
         analysis_run_id = feedback_crm.fi_create_analysis_run(
             tenant_id,
@@ -5264,9 +5711,18 @@ def run_fi_analysis_background(
                 "status": status,
                 "limit": limit,
                 "offset": offset,
+                "force_reanalyze": bool(force_reanalyze),
+                "selected_reviews_count": selected_reviews_count,
+                "already_analyzed_skipped": already_analyzed_count,
+                "reanalyzed_outdated": reanalyzed_outdated_count,
             },
         )
         if total_reviews == 0:
+            empty_msg = (
+                f"Skipped analysis: all {already_analyzed_count} selected feedback record(s) are already analyzed on the current prompt version."
+                if already_analyzed_count > 0 and not force_reanalyze
+                else "No feedback matched this analysis request."
+            )
             feedback_crm.fi_finish_analysis_run(
                 analysis_run_id,
                 tenant_id,
@@ -5285,25 +5741,33 @@ def run_fi_analysis_background(
                     end_date=end_date,
                 ),
                 trends=[],
-                metadata={"message": "No feedback matched this analysis request."},
+                metadata={
+                    "message": empty_msg,
+                    "force_reanalyze": bool(force_reanalyze),
+                    "selected_reviews_count": selected_reviews_count,
+                    "already_analyzed_skipped": already_analyzed_count,
+                    "reanalyzed_outdated": reanalyzed_outdated_count,
+                },
             )
             _set_task(
                 task_id,
                 {
                     "status": "completed",
                     "progress": 100,
-                    "message": "No feedback matched this analysis request.",
+                    "message": empty_msg,
                     "processed_reviews": 0,
                     "total_reviews": 0,
-                    "fetched_reviews": 0,
+                    "fetched_reviews": selected_reviews_count,
                     "analyzed_reviews": 0,
                     "fallback_reviews": 0,
                     "unresolved_reviews": 0,
                     "dropped_reviews": 0,
                     "in_flight_reviews": 0,
                     "coverage_pct": 0.0,
+                    "skipped_already_analyzed": already_analyzed_count,
+                    "reanalyzed_outdated": reanalyzed_outdated_count,
                 },
-                append_log="No feedback matched this analysis request.",
+                append_log=empty_msg,
             )
             return
 
@@ -5329,18 +5793,49 @@ def run_fi_analysis_background(
                 "message": "Preparing Feedback CRM records for analysis...",
                 "processed_reviews": 0,
                 "total_reviews": total_reviews,
-                "fetched_reviews": total_reviews,
+                "fetched_reviews": selected_reviews_count,
                 "analyzed_reviews": 0,
                 "fallback_reviews": 0,
                 "unresolved_reviews": 0,
                 "dropped_reviews": 0,
                 "in_flight_reviews": total_reviews,
                 "coverage_pct": 0.0,
+                "skipped_already_analyzed": already_analyzed_count,
+                "reanalyzed_outdated": reanalyzed_outdated_count,
             },
             append_log="Preparing Feedback CRM records for analysis...",
         )
+        if already_analyzed_count > 0 and not force_reanalyze:
+            skip_msg = f"Skipping {already_analyzed_count} feedback record(s) that were already analyzed."
+            _set_task(
+                task_id,
+                {
+                    "status": "analyzing",
+                    "progress": 12,
+                    "message": skip_msg,
+                    "skipped_already_analyzed": already_analyzed_count,
+                },
+                append_log=skip_msg,
+            )
+        if reanalyzed_outdated_count > 0 and not force_reanalyze:
+            reanalyze_msg = (
+                f"Refreshing {reanalyzed_outdated_count} feedback record(s) analyzed with an older prompt version."
+            )
+            _set_task(
+                task_id,
+                {
+                    "status": "analyzing",
+                    "progress": 14,
+                    "message": reanalyze_msg,
+                    "reanalyzed_outdated": reanalyzed_outdated_count,
+                },
+                append_log=reanalyze_msg,
+            )
 
         cleaned_reviews = []
+        dedupe_primary_by_signature: Dict[str, str] = {}
+        duplicate_review_links: Dict[str, List[str]] = {}
+        deduped_reviews = 0
         for i, review in enumerate(reviews_for_analysis):
             raw_text = review.get("content") or review.get("text") or review.get("body") or review.get("review", "")
             try:
@@ -5361,6 +5856,21 @@ def run_fi_analysis_background(
                 cleaned = processor.clean_review_text(raw_text)
             if len(str(cleaned or "").strip()) < processor.MIN_REVIEW_CHAR_LENGTH and "non_english_filtered" not in clean_flags:
                 cleaned = str(raw_text or "").strip()[:processor.MAX_PROMPT_REVIEW_CHARS] or "No text provided"
+
+            review_id = str(review.get("id") or "").strip()
+            normalized_cleaned = re.sub(r"\s+", " ", str(cleaned or "").strip().lower())
+            if not normalized_cleaned:
+                normalized_cleaned = re.sub(r"\s+", " ", str(raw_text or "").strip().lower())
+            dedupe_signature = f"{rating_value}|{normalized_cleaned[:900]}"
+            canonical_review_id = dedupe_primary_by_signature.get(dedupe_signature)
+            if canonical_review_id and review_id and canonical_review_id != review_id:
+                duplicate_review_links.setdefault(canonical_review_id, []).append(review_id)
+                deduped_reviews += 1
+                continue
+
+            if review_id:
+                dedupe_primary_by_signature[dedupe_signature] = review_id
+                duplicate_review_links.setdefault(review_id, [])
 
             cleaned_reviews.append({
                 **review,
@@ -5420,13 +5930,14 @@ def run_fi_analysis_background(
                         "message": msg,
                         "processed_reviews": i,
                         "total_reviews": total_reviews,
-                        "fetched_reviews": total_reviews,
+                        "fetched_reviews": selected_reviews_count,
                         "analyzed_reviews": 0,
                         "fallback_reviews": 0,
                         "unresolved_reviews": 0,
                         "dropped_reviews": 0,
                         "in_flight_reviews": total_reviews,
                         "coverage_pct": 0.0,
+                        "skipped_already_analyzed": already_analyzed_count,
                     },
                     append_log=msg,
                 )
@@ -5450,6 +5961,20 @@ def run_fi_analysis_background(
             )
             return
 
+        if deduped_reviews > 0:
+            dedupe_msg = (
+                f"Token optimizer reused {deduped_reviews} near-duplicate reviews before LLM analysis."
+            )
+            _set_task(
+                task_id,
+                {
+                    "status": "analyzing",
+                    "progress": 15,
+                    "message": dedupe_msg,
+                },
+                append_log=dedupe_msg,
+            )
+
         def progress_cb(pct, msg, meta=None):
             patch = {
                 "status": "paused" if pause_event.is_set() else ("stopping" if stop_event.is_set() else "analyzing"),
@@ -5472,15 +5997,16 @@ def run_fi_analysis_background(
 
         llm_probe_ok = True
         llm_probe_error = ""
-        llm_health = processor.check_llm_connectivity(
+        llm_health = _check_llm_connectivity_with_retries(
             timeout_seconds=max(20, int(getattr(settings, "OLLAMA_PREFLIGHT_TIMEOUT_SECONDS", 30) or 30)),
+            max_attempts=3,
             force_refresh=True,
         )
         if not llm_health.get("ok"):
             llm_probe_ok = False
             llm_probe_error = str(llm_health.get("error") or "unknown preflight error")
             degraded_msg = (
-                "LLM tunnel probe failed. Continuing in standby mode while the tunnel recovers."
+                "LLM tunnel probe failed. Continuing with strict model-only retries while the tunnel recovers."
             )
             _set_task(
                 task_id,
@@ -5503,11 +6029,52 @@ def run_fi_analysis_background(
                 "feedback_crm",
             )
         else:
-            results = processor.run_fallback_analysis_batch(
-                cleaned_reviews,
-                progress_callback=progress_cb,
-                reason="llm_preflight_unavailable_fallback",
+            # Probe failed but still attempt strict model-only analysis.
+            degraded_attempt_msg = (
+                "LLM probe was unstable but attempting live analysis anyway. "
+                "Each review will retry model inference; unresolved rows will fail the run in strict mode."
             )
+            _set_task(
+                task_id,
+                {
+                    "status": "analyzing",
+                    "progress": 16,
+                    "message": degraded_attempt_msg,
+                },
+                append_log=degraded_attempt_msg,
+            )
+            results = processor.run_analysis_batch(
+                cleaned_reviews,
+                vertical or "generic",
+                None,
+                progress_cb,
+                stop_event,
+                pause_event,
+                "feedback_crm",
+            )
+
+        if duplicate_review_links:
+            expanded_results: List[Dict[str, Any]] = []
+            for result in results:
+                primary_review_id = str(result.get("id") or result.get("review_id") or "").strip()
+                expanded_results.append(result)
+                if not primary_review_id:
+                    continue
+                duplicate_ids = duplicate_review_links.get(primary_review_id) or []
+                for duplicate_review_id in duplicate_ids:
+                    if not duplicate_review_id or duplicate_review_id == primary_review_id:
+                        continue
+                    duplicate_result = dict(result)
+                    duplicate_result["id"] = duplicate_review_id
+                    duplicate_result["review_id"] = duplicate_review_id
+                    duplicate_result["_meta_tokens"] = 0
+                    duplicate_result["_meta_fallback"] = False
+                    duplicate_result["_meta_reason"] = "dedupe_reuse"
+                    duplicate_result["_meta_error"] = False
+                    duplicate_result["_meta_reused_analysis"] = True
+                    duplicate_result["_meta_deduped_from"] = primary_review_id
+                    expanded_results.append(duplicate_result)
+            results = expanded_results
 
         fallback_reviews = sum(
             1
@@ -5517,6 +6084,64 @@ def run_fi_analysis_background(
         )
         unresolved_reviews = sum(1 for r in results if bool(r.get("_meta_error")))
         dropped_reviews = max(total_reviews - len(results), 0)
+        coverage_pct = round((len(results) / max(total_reviews, 1)) * 100, 2)
+        if _STRICT_LLM_ANALYSIS and _STRICT_ANALYSIS_FAIL_ON_UNRESOLVED and unresolved_reviews > 0:
+            unresolved_preview = []
+            for row in results:
+                if not bool(row.get("_meta_error")):
+                    continue
+                unresolved_preview.append(
+                    {
+                        "id": str(row.get("id") or row.get("review_id") or ""),
+                        "reason": str(row.get("_meta_reason") or ""),
+                        "detail": str(row.get("_meta_error_detail") or "")[:240],
+                    }
+                )
+                if len(unresolved_preview) >= 25:
+                    break
+            strict_msg = (
+                f"Strict Feedback CRM analysis failed: {unresolved_reviews}/{total_reviews} records returned unresolved "
+                "model outputs after retries. No heuristic fallback was applied."
+            )
+            feedback_crm.fi_finish_analysis_run(
+                analysis_run_id,
+                tenant_id,
+                status="failed",
+                analyzed_reviews=len(results),
+                fallback_reviews=fallback_reviews,
+                unresolved_reviews=unresolved_reviews,
+                dropped_reviews=dropped_reviews,
+                metadata={
+                    "task_id": task_id,
+                    "vertical": vertical or "generic",
+                    "strict_mode": True,
+                    "llm_probe_ok": llm_probe_ok,
+                    "llm_probe_error": llm_probe_error,
+                    "unresolved_preview": unresolved_preview,
+                    "message": strict_msg,
+                },
+            )
+            _set_task(
+                task_id,
+                {
+                    "status": "failed",
+                    "progress": 100,
+                    "message": strict_msg,
+                    "processed_reviews": len(results),
+                    "total_reviews": total_reviews,
+                    "fetched_reviews": total_reviews,
+                    "analyzed_reviews": len(results),
+                    "fallback_reviews": fallback_reviews,
+                    "unresolved_reviews": unresolved_reviews,
+                    "dropped_reviews": dropped_reviews,
+                    "in_flight_reviews": 0,
+                    "coverage_pct": coverage_pct,
+                    "analysis_run_id": analysis_run_id,
+                    "_completed_at": time.time(),
+                },
+                append_log=strict_msg,
+            )
+            return
 
         _set_task(
             task_id,
@@ -5533,6 +6158,15 @@ def run_fi_analysis_background(
             results,
             analysis_run_id=analysis_run_id,
         )
+        apply_summary["skipped_already_analyzed"] = already_analyzed_count
+        retention_summary = feedback_crm.fi_process_retention_intelligence_from_analysis(
+            tenant_id,
+            user_id,
+            results,
+            run_rescue=True,
+            source="feedback_crm_analysis",
+        )
+        apply_summary["retention_intelligence"] = retention_summary
         feedback_crm.fi_recalculate_all_issues(tenant_id)
         feedback_crm.fi_refresh_trends(tenant_id)
         usage_tokens = int(sum(int(r.get("_meta_tokens", 0) or 0) for r in results) or 0)
@@ -5592,8 +6226,13 @@ def run_fi_analysis_background(
             metadata={
                 "task_id": task_id,
                 "apply_summary": apply_summary,
+                "retention_intelligence": retention_summary,
                 "vertical": vertical or "generic",
                 "stopped": bool(stop_event.is_set()),
+                "force_reanalyze": bool(force_reanalyze),
+                "selected_reviews_count": selected_reviews_count,
+                "already_analyzed_skipped": already_analyzed_count,
+                "reanalyzed_outdated": reanalyzed_outdated_count,
                 "llm_probe_ok": llm_probe_ok,
                 "llm_probe_error": llm_probe_error,
             },
@@ -5609,6 +6248,14 @@ def run_fi_analysis_background(
                 f"Feedback CRM analysis completed for {len(results)} records. "
                 f"Updated {apply_summary.get('updated_feedback', 0)} feedback rows and refreshed issue views."
             )
+        if already_analyzed_count > 0 and not force_reanalyze:
+            summary_msg = (
+                f"{summary_msg} Skipped {already_analyzed_count} already analyzed record(s)."
+            )
+        if reanalyzed_outdated_count > 0 and not force_reanalyze:
+            summary_msg = (
+                f"{summary_msg} Refreshed {reanalyzed_outdated_count} record(s) from older analysis prompt versions."
+            )
         _set_task(
             task_id,
             {
@@ -5617,15 +6264,17 @@ def run_fi_analysis_background(
                 "message": summary_msg,
                 "processed_reviews": len(results),
                 "total_reviews": total_reviews,
-                "fetched_reviews": total_reviews,
+                "fetched_reviews": selected_reviews_count,
                 "analyzed_reviews": len(results),
                 "fallback_reviews": fallback_reviews,
                 "unresolved_reviews": unresolved_reviews,
                 "dropped_reviews": dropped_reviews,
                 "in_flight_reviews": 0,
-                "coverage_pct": round((len(results) / max(total_reviews, 1)) * 100, 2),
+                "coverage_pct": coverage_pct,
                 "fi_summary": apply_summary,
                 "analysis_run_id": analysis_run_id,
+                "skipped_already_analyzed": already_analyzed_count,
+                "reanalyzed_outdated": reanalyzed_outdated_count,
             },
             append_log=summary_msg,
         )
@@ -5664,13 +6313,12 @@ async def fi_analyze_feedback(
     if not _llm_enabled_for_user(current_user["user_id"], current_user.get("tenant_id")):
         raise HTTPException(status_code=403, detail="LLM usage is disconnected for this account. Reconnect it in settings to run CRM analysis.")
     llm_preflight_warning: Optional[str] = None
-    llm_health = await asyncio.to_thread(processor.check_llm_connectivity)
-    if not llm_health.get("ok"):
-        llm_health = await asyncio.to_thread(
-            processor.check_llm_connectivity,
-            max(20, int(getattr(settings, "OLLAMA_PREFLIGHT_TIMEOUT_SECONDS", 30) or 30)),
-            True,
-        )
+    llm_health = await asyncio.to_thread(
+        _check_llm_connectivity_with_retries,
+        max(20, int(getattr(settings, "OLLAMA_PREFLIGHT_TIMEOUT_SECONDS", 30) or 30)),
+        3,
+        True,
+    )
     if not llm_health.get("ok"):
         error_detail = llm_health.get("error") or "Endpoint did not pass analysis probe."
         llm_preflight_warning = (
@@ -5775,6 +6423,7 @@ async def fi_analyze_feedback(
             resolved_limit,
             resolved_offset,
             req.vertical or "generic",
+            bool(req.force_reanalyze),
         )
     else:
         asyncio.create_task(
@@ -5796,6 +6445,7 @@ async def fi_analyze_feedback(
                 resolved_limit,
                 resolved_offset,
                 req.vertical or "generic",
+                bool(req.force_reanalyze),
             )
         )
 
@@ -5820,6 +6470,53 @@ async def fi_generate_response(req: FIGenerateResponseRequest, current_user: dic
 
 
 # ── Import from existing CXM data ───────────────────────────────────────────
+
+
+@app.post("/api/fi/retention/intelligence/analyze")
+async def fi_retention_intelligence_analyze(
+    req: FIRetentionIntelligenceRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    if not _llm_enabled_for_user(current_user["user_id"], current_user.get("tenant_id")):
+        raise HTTPException(
+            status_code=403,
+            detail="LLM usage is disconnected for this account. Reconnect it in settings to run retention intelligence.",
+        )
+    if not (req.feedback_id or req.feedback):
+        raise HTTPException(status_code=400, detail="Provide feedback or feedback_id")
+
+    try:
+        result = feedback_crm.fi_analyze_feedback_intelligence(
+            current_user["tenant_id"],
+            current_user["user_id"],
+            feedback_text=req.feedback,
+            feedback_id=req.feedback_id,
+            customer_identifier=req.customer_identifier,
+            run_rescue=bool(req.run_rescue),
+            source="manual_endpoint",
+        )
+        return result
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Retention intelligence failed: {exc}")
+
+
+@app.get("/api/fi/retention/intelligence")
+async def fi_retention_intelligence_list(
+    churn_risk: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
+    current_user: dict = Depends(get_current_user),
+):
+    return feedback_crm.fi_list_feedback_intelligence(
+        current_user["tenant_id"],
+        current_user["user_id"],
+        churn_risk=churn_risk,
+        limit=limit,
+        offset=offset,
+    )
+
 
 @app.post("/api/fi/import-cxm")
 async def fi_import_cxm(
@@ -6092,3 +6789,4 @@ async def api_fi_winback_draft(customer_id: int, current_user: dict = Depends(ge
 if __name__ == "__main__":
     reload_enabled = os.getenv("UVICORN_RELOAD", "false").lower() in {"1", "true", "yes", "on"}
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=reload_enabled)
+

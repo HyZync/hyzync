@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Lock, Menu, X } from 'lucide-react';
+import { Menu, X } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import logoWordmark from '../assets/logo_f.png';
-import { useHorizonAvailabilityNotice } from './HorizonAvailabilityNoticeProvider';
 
 const Navbar = () => {
     const [isOpen, setIsOpen] = useState(false);
@@ -10,7 +9,6 @@ const Navbar = () => {
     const lastScrollY = useRef(0);
     const location = useLocation();
     const navigate = useNavigate();
-    const { openHorizonAvailabilityNotice, isHorizonLocked } = useHorizonAvailabilityNotice();
     const isHomeRoute = location.pathname === '/';
 
     const [isScrolled, setIsScrolled] = useState(false);
@@ -39,11 +37,6 @@ const Navbar = () => {
 
     const handleNavClick = (path) => {
         setIsOpen(false);
-
-        if (path === '/horizon') {
-            openHorizonAvailabilityNotice();
-            return;
-        }
 
         // If it's a hash link
         if (path.includes('#')) {
@@ -267,9 +260,7 @@ const Navbar = () => {
                                                         : 'text-white/70 hover:bg-white/10 hover:text-white'
                                         }`}
                                     >
-                                        {item.path === '/horizon' && isHorizonLocked ? (
-                                            <Lock size={12} className={isHomeRoute ? 'text-amber-600' : 'text-amber-300'} />
-                                        ) : item.special ? (
+                                        {item.special ? (
                                             <span className={`h-2 w-2 rounded-full shadow-[0_0_16px_rgba(34,211,238,0.8)] ${isHomeRoute ? 'bg-cyan-400' : 'bg-cyan-300'}`} />
                                         ) : null}
                                         <span>{item.name}</span>
@@ -330,7 +321,6 @@ const Navbar = () => {
                                             }`}
                                         >
                                             <span className="inline-flex items-center gap-2">
-                                                {item.path === '/horizon' && isHorizonLocked && <Lock size={14} className={isHomeRoute ? 'text-amber-600' : 'text-amber-300'} />}
                                                 {item.name}
                                             </span>
                                         </button>

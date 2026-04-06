@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 # ── Config ────────────────────────────────────────────────────────────────────
 OLLAMA_BASE  = os.getenv("OLLAMA_URL", "https://ai.hyzync.com")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3.5:4b")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "phi4-mini")
 
 # Max parallel LLM workers — keep this conservative for small local models.
 MAX_WORKERS  = int(os.getenv("CXM_ANALYSIS_WORKERS", "2"))

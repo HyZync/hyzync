@@ -1296,7 +1296,7 @@ const AnalysisFlow = ({ user, workspace, onBack, isPreviewMode = false, onUserUp
         limit: 100
     });
     const [arpu, setArpu] = useState('');
-    const [countRange, setCountRange] = useState([1, 500]);
+    const [countRange, setCountRange] = useState([1, 1]);
     const [ratingFilter, setRatingFilter] = useState([1, 2, 3, 4, 5]);
     const [sourceFilter, setSourceFilter] = useState([]); // which sources to include
     const [cleaningOptions, setCleaningOptions] = useState({
@@ -1317,7 +1317,10 @@ const AnalysisFlow = ({ user, workspace, onBack, isPreviewMode = false, onUserUp
         }
         if (cleaningOptions.nonEnglishFilter) reviews = reviews.filter(r => { const t = r.content || ''; if (!t) return false; const ascii = t.split('').filter(c => c.charCodeAt(0) < 128).length; return ascii / Math.max(t.length, 1) > 0.75; });
         // apply count range
-        reviews = reviews.slice(countRange[0] - 1, countRange[1]);
+        const totalInWindow = Math.max(1, reviews.length);
+        const from = Math.max(1, Math.min(Number(countRange?.[0]) || 1, totalInWindow));
+        const to = Math.max(from, Math.min(Number(countRange?.[1]) || totalInWindow, totalInWindow));
+        reviews = reviews.slice(from - 1, to);
         return reviews;
     };
     
@@ -1348,6 +1351,7 @@ const AnalysisFlow = ({ user, workspace, onBack, isPreviewMode = false, onUserUp
 
         setActiveNodes(HORIZON_PREVIEW_CONNECTORS);
         setPreviewReviews(HORIZON_PREVIEW_REVIEWS);
+        setCountRange([1, Math.max(1, HORIZON_PREVIEW_REVIEWS.length)]);
         setSyncStats({ added: HORIZON_PREVIEW_REVIEWS.length, skipped: 0 });
         setIsFetchingNodes(false);
         setError(null);
@@ -1485,7 +1489,7 @@ const AnalysisFlow = ({ user, workspace, onBack, isPreviewMode = false, onUserUp
         }
     };
 
-    const handleEnableConnector = async (type, identifier, name, config) => {
+    const handleEnableConnector = async (type, identifier, name, config, options = {}) => {
         if (isPreviewMode) {
             setError('Preview mode is read-only. Sign in with an access code to save connectors.');
             return;
@@ -1498,7 +1502,10 @@ const AnalysisFlow = ({ user, workspace, onBack, isPreviewMode = false, onUserUp
                     identifier: identifier,
                     name: name || `${type.charAt(0).toUpperCase() + type.slice(1)}: ${identifier}`,
                     config: config,
-                    workspace_id: workspace.id
+                    workspace_id: workspace.id,
+                    fetch_interval: options.fetchInterval,
+                    analysis_interval: options.analysisInterval,
+                    max_reviews: options.maxReviews,
                 })
             });
             if (res.ok) {
@@ -1629,15 +1636,10 @@ const AnalysisFlow = ({ user, workspace, onBack, isPreviewMode = false, onUserUp
                 setResults({ ...hardened, id: data.id });
                 clearTaskPollTimer();
                 activePollingTaskRef.current = null;
-                // We don't automatically jump to step 4 anymore if they are browsing
-                // setCurrentStep(4);
-                
-                // Keep overlay slightly longer so they see success, then auto-close
-                setTimeout(() => {
-                    setIsAnalysisOverlayOpen(false);
-                    setCurrentStep(4);
-                }, 2000);
-
+                setAnalysisProgress(100);
+                setResultsTab('overview');
+                setIsAnalysisOverlayOpen(false);
+                setCurrentStep(4);
                 setIsPaused(false);
                 setIsStopped(false);
                 setInFlightReviews(0);
@@ -1756,38 +1758,48 @@ const AnalysisFlow = ({ user, workspace, onBack, isPreviewMode = false, onUserUp
 
                 // ── Non-CSV nodes use preload ──
                 try {
-                    const preloadBody = {
-                        source_type:  node.connector_type,
-                        identifier:   node.identifier,
-                        country:      node.config?.country || 'us',
-                        max_reviews:  node.config?.max_reviews || 200,
-                        user_id:      user.id,
-                        workspace_id: workspace.id,
+                    let res;
+                    if (node.id) {
+                        res = await apiFetch(`${API_BASE}/api/user/connectors/${node.id}/fetch`, {
+                            method: 'POST',
+                        }, { timeoutMs: 60000 });
+                    } else {
+                        const preloadBody = {
+                            source_type:  node.connector_type,
+                            identifier:   node.identifier,
+                            country:      node.config?.country || 'us',
+                            max_reviews:  Number(node.config?.count || node.config?.max_reviews || 200),
+                            user_id:      user.id,
+                            workspace_id: workspace.id,
                         config:       node.config || {},   // ← pass full config (tokens, URLs, auth, etc.)
-                    };
+                        };
 
-                    const res = await apiFetch(`${API_BASE}/api/source/preload`, {
+                        res = await apiFetch(`${API_BASE}/api/source/preload`, {
                         method: 'POST',
                         body: JSON.stringify(preloadBody)
                     }, { timeoutMs: 60000 });
+                    }
                     let data;
                     try { data = await res.json(); } catch { data = {}; }
 
-                    if (data.status === 'success') {
+                    if (res.ok && data.status === 'success') {
                         totalAdded   += data.added   || 0;
                         totalSkipped += data.skipped || 0;
 
-                        // Fetch reviews for this node and combine
-                        const revRes  = await apiFetch(
-                            `${API_BASE}/api/source/reviews?source_type=${node.connector_type}&identifier=${encodeURIComponent(node.identifier)}&workspace_id=${workspace.id}`
-                        );
-                        let revData;
-                        try { revData = await revRes.json(); } catch { revData = {}; }
-                        if (revData.reviews) {
-                            combinedReviews = [...combinedReviews, ...revData.reviews];
+                        if (Array.isArray(data.reviews) && data.reviews.length > 0) {
+                            combinedReviews = [...combinedReviews, ...data.reviews];
+                        } else {
+                            const revRes  = await apiFetch(
+                                `${API_BASE}/api/source/reviews?source_type=${node.connector_type}&identifier=${encodeURIComponent(node.identifier)}&workspace_id=${workspace.id}`
+                            );
+                            let revData;
+                            try { revData = await revRes.json(); } catch { revData = {}; }
+                            if (revData.reviews) {
+                                combinedReviews = [...combinedReviews, ...revData.reviews];
+                            }
                         }
                     } else {
-                        errors.push(`${node.name || node.connector_type}: ${data.message || 'Sync failed.'}`);
+                        errors.push(`${node.name || node.connector_type}: ${data.message || data.detail || 'Sync failed.'}`);
                     }
                 } catch (nodeErr) {
                     errors.push(`${node.name || node.connector_type}: ${nodeErr.message}`);
@@ -1796,6 +1808,7 @@ const AnalysisFlow = ({ user, workspace, onBack, isPreviewMode = false, onUserUp
 
             setSyncStats({ added: totalAdded, skipped: totalSkipped });
             setPreviewReviews(combinedReviews);
+            setCountRange([1, Math.max(1, combinedReviews.length)]);
 
             if (errors.length > 0 && combinedReviews.length === 0) {
                 setError(errors.join(' | '));
@@ -2056,7 +2069,17 @@ const AnalysisFlow = ({ user, workspace, onBack, isPreviewMode = false, onUserUp
         const fetchInterval = document.getElementById(`inline-interval-${connector.id}`)?.value || 'manual';
         const maxReviews = parseInt(document.getElementById(`inline-limit-${connector.id}`)?.value) || 200;
 
-        handleEnableConnector(connector.id, idValue, null, { ...config, fetch_interval: fetchInterval, max_reviews: maxReviews });
+        handleEnableConnector(
+            connector.id,
+            idValue,
+            null,
+            { ...config, fetch_interval: fetchInterval, max_reviews: maxReviews },
+            {
+                fetchInterval,
+                analysisInterval: fetchInterval === 'manual' ? 'manual' : fetchInterval,
+                maxReviews,
+            },
+        );
         setTempFile(null);
         setCsvHeaders([]);
         setCsvColumnMap({ content: '', score: '', date: '', author: '' });

@@ -8,8 +8,10 @@ All database operations use the existing SQLite infrastructure from database.py.
 """
 
 import json
+import hashlib
 import logging
 import math
+import re
 import smtplib
 import ssl
 from datetime import datetime, timedelta
@@ -21,10 +23,100 @@ from database import get_db_connection
 
 logger = logging.getLogger("hyzync.feedback_crm")
 
-FI_CRM_PROMPT_VERSION = "feedback_crm_v2"
+FI_CRM_PROMPT_VERSION = "feedback_crm_v5"
 FI_CRM_CLEANING_VERSION = "feedback_crm_clean_v2"
 VALID_KB_CHANNELS = {"any", "email", "sms", "both"}
 ALL_SEGMENT_TOKENS = {"all", "any", "default", "*"}
+GENERIC_ISSUE_LABELS = {
+    "",
+    "none",
+    "null",
+    "n/a",
+    "na",
+    "unknown",
+    "unclassified",
+    "other",
+    "feature",
+    "features",
+    "feature request",
+    "feature requests",
+    "feature gap",
+    "feature gaps",
+    "missing feature",
+    "missing features",
+    "feature request or gap",
+    "requested improvement",
+    "requested capability",
+    "missing capability",
+    "customer suggested a missing capability",
+    "issue",
+    "issues",
+    "problem",
+    "problems",
+    "complaint",
+    "complaints",
+    "bugs",
+    "bug",
+    "pricing",
+    "support",
+    "ux",
+    "ui",
+    "performance",
+    "reliability",
+    "onboarding",
+    "cancellation",
+    "renewal",
+    "value",
+    "mixed experience",
+    "user dissatisfaction",
+    "no major issues reported",
+    "general satisfaction",
+    "unspecified product issue",
+    "general feedback",
+}
+GENERIC_ISSUE_TOKENS = {
+    "feature",
+    "features",
+    "request",
+    "requests",
+    "gap",
+    "gaps",
+    "missing",
+    "issue",
+    "issues",
+    "problem",
+    "problems",
+    "bug",
+    "bugs",
+    "complaint",
+    "complaints",
+    "support",
+    "pricing",
+    "billing",
+    "ux",
+    "ui",
+    "performance",
+    "reliability",
+    "onboarding",
+    "value",
+    "general",
+    "feedback",
+    "experience",
+    "user",
+    "dissatisfaction",
+    "mixed",
+    "major",
+    "reported",
+    "improvement",
+    "requested",
+    "capability",
+}
+GENERIC_ISSUE_FILLER_TOKENS = {"a", "an", "the", "and", "or", "to", "for", "of", "in", "with", "without"}
+FEATURE_HINT_PATTERNS = [
+    re.compile(r"(?:please\s+add|add|support(?:\s+for)?|integration\s+with)\s+([a-z0-9][a-z0-9/&+\-\s]{3,70})", re.IGNORECASE),
+    re.compile(r"(?:missing|lack(?:ing|s)?|need(?:ed|s)?|want(?:ed)?|wish(?:ed)?(?:\s+for)?|without|no)\s+(?:an?\s+|the\s+)?([a-z0-9][a-z0-9/&+\-\s]{3,70})", re.IGNORECASE),
+]
+NONE_LIKE_TOKENS = {"", "none", "n/a", "na", "null", "unknown", "not sure"}
 
 CONTACT_EMAIL_KEYS = {
     "email",
@@ -89,6 +181,148 @@ def _coerce_text(value: Any, fallback: str = "", limit: int = 180) -> str:
     return text[:limit]
 
 
+def _compact_issue_label(value: Any, limit: int = 120) -> str:
+    text = _coerce_text(value, "", 240)
+    if not text:
+        return ""
+    lowered = text.lower()
+    split_index = None
+    for token in (" because ", ". ", ";", " - ", ":", ","):
+        idx = lowered.find(token)
+        if idx > 18:
+            split_index = idx
+            break
+    if split_index is not None:
+        text = text[:split_index]
+    text = text.strip(" .,:;!-_")
+    return _coerce_text(text, "", limit)
+
+
+def _is_generic_issue_label(value: Any) -> bool:
+    label = _compact_issue_label(value, 120).lower()
+    if not label:
+        return True
+    if label in GENERIC_ISSUE_LABELS:
+        return True
+    tokens = [
+        token
+        for token in re.split(r"[^a-z0-9]+", label)
+        if token and token not in GENERIC_ISSUE_FILLER_TOKENS
+    ]
+    if tokens and all(token in GENERIC_ISSUE_TOKENS for token in tokens):
+        return True
+    if len(label) <= 3:
+        return True
+    return False
+
+
+def _extract_feature_gap_label(*candidates: Any) -> str:
+    for raw in candidates:
+        text = _coerce_text(raw, "", 260)
+        if not text:
+            continue
+        for pattern in FEATURE_HINT_PATTERNS:
+            match = pattern.search(text)
+            if not match:
+                continue
+            fragment = _coerce_text(match.group(1), "", 90)
+            fragment = re.split(r"[.,;!?]", fragment, maxsplit=1)[0].strip(" -_:")
+            if not fragment:
+                continue
+            normalized_fragment = _coerce_text(fragment, "", 70)
+            if _is_generic_issue_label(normalized_fragment):
+                continue
+            return _coerce_text(f"Missing {normalized_fragment}", "", 120)
+    return ""
+
+
+def _derive_actionable_issue_label(*candidates: Any) -> str:
+    for candidate in candidates:
+        label = _compact_issue_label(candidate, 120)
+        if not label:
+            continue
+        if _is_generic_issue_label(label):
+            continue
+        return label
+    return "Unspecified product issue"
+
+
+def fi_is_analysis_stale(
+    metadata_payload: Any,
+    *,
+    prompt_version: str = FI_CRM_PROMPT_VERSION,
+    cleaning_version: str = FI_CRM_CLEANING_VERSION,
+) -> bool:
+    metadata = metadata_payload if isinstance(metadata_payload, dict) else _json_load_dict(metadata_payload)
+    analysis_meta = metadata.get("analysis") if isinstance(metadata.get("analysis"), dict) else {}
+    stored_prompt_version = _coerce_text(analysis_meta.get("prompt_version"), "", 80)
+    stored_cleaning_version = _coerce_text(analysis_meta.get("cleaning_version"), "", 80)
+    target_prompt_version = _coerce_text(prompt_version, "", 80)
+    target_cleaning_version = _coerce_text(cleaning_version, "", 80)
+
+    if not stored_prompt_version:
+        return True
+    if target_prompt_version and stored_prompt_version != target_prompt_version:
+        return True
+    if target_cleaning_version and not stored_cleaning_version:
+        return True
+    if target_cleaning_version and stored_cleaning_version and stored_cleaning_version != target_cleaning_version:
+        return True
+    return False
+
+
+def fi_feedback_row_requires_reanalysis(row: Optional[Dict[str, Any]]) -> bool:
+    if not isinstance(row, dict):
+        return True
+    if not row.get("last_analyzed_at"):
+        return True
+    return fi_is_analysis_stale(
+        row.get("metadata_json"),
+        prompt_version=FI_CRM_PROMPT_VERSION,
+        cleaning_version=FI_CRM_CLEANING_VERSION,
+    )
+
+
+def _normalize_filter_timestamp(value: Optional[str], *, end_of_day: bool = False) -> Optional[str]:
+    text = _coerce_text(value, "", 64)
+    if not text:
+        return None
+    if len(text) == 10 and text[4] == "-" and text[7] == "-":
+        return f"{text}T23:59:59.999999" if end_of_day else text
+    return text
+
+
+def _table_exists(cursor, table_name: str) -> bool:
+    cursor.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+        (table_name,),
+    )
+    return cursor.fetchone() is not None
+
+
+def _column_exists(cursor, table_name: str, column_name: str) -> bool:
+    try:
+        cursor.execute(f"PRAGMA table_info({table_name})")
+    except Exception:
+        return False
+    wanted = str(column_name or "").strip().lower()
+    for row in cursor.fetchall():
+        name_value = ""
+        if isinstance(row, dict):
+            name_value = row.get("name", "")
+        else:
+            try:
+                name_value = row["name"]
+            except Exception:
+                try:
+                    name_value = row[1]
+                except Exception:
+                    name_value = ""
+        if str(name_value).strip().lower() == wanted:
+            return True
+    return False
+
+
 def _sentiment_numeric(value: Any) -> float:
     try:
         return float(value)
@@ -110,6 +344,211 @@ def _sentiment_bucket_value(value: Any) -> int:
 def _churn_bucket_value(value: Any) -> int:
     text = str(value or "").strip().lower()
     return {"high": 3, "medium": 2, "low": 1, "none": 0, "null": 0}.get(text, 0)
+
+
+def _clamp_float(value: Any, lower: float, upper: float) -> float:
+    try:
+        numeric = float(value)
+    except Exception:
+        numeric = lower
+    if numeric < lower:
+        return lower
+    if numeric > upper:
+        return upper
+    return numeric
+
+
+def _normalize_date(value: Any) -> Optional[datetime.date]:
+    text = _coerce_text(value, "", 40)
+    if not text:
+        return None
+    try:
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        if len(text) == 10 and text[4] == "-" and text[7] == "-":
+            return datetime.strptime(text, "%Y-%m-%d").date()
+        return datetime.fromisoformat(text).date()
+    except Exception:
+        return None
+
+
+def _is_none_like(value: Any) -> bool:
+    text = _coerce_text(value, "", 180).strip().lower()
+    return text in NONE_LIKE_TOKENS
+
+
+def _is_churn_linked_signal(sentiment: Any, sentiment_score: Any, churn_risk: Any, churn_impact: Any) -> bool:
+    sentiment_name = str(sentiment or "").strip().lower()
+    sentiment_value = _sentiment_numeric(sentiment_score)
+    churn_risk_value = _churn_bucket_value(churn_risk)
+    churn_impact_value = _churn_bucket_value(churn_impact)
+    return bool(
+        churn_risk_value >= 2
+        or churn_impact_value >= 2
+        or sentiment_value < 0
+        or sentiment_name == "negative"
+    )
+
+
+def _compute_business_impact_score(
+    *,
+    churn_risk: Any,
+    revenue_sensitivity: Any,
+    urgency: Any,
+) -> float:
+    churn_component = {"high": 100.0, "medium": 65.0, "low": 30.0, "null": 5.0, "none": 5.0}.get(
+        str(churn_risk or "").strip().lower(),
+        5.0,
+    )
+    urgency_component = {"high": 100.0, "medium": 65.0, "low": 30.0, "none": 5.0}.get(
+        str(urgency or "").strip().lower(),
+        5.0,
+    )
+    revenue_component = 100.0 if bool(revenue_sensitivity) else 0.0
+    score = (churn_component * 0.55) + (revenue_component * 0.25) + (urgency_component * 0.20)
+    return round(_clamp_float(score, 0.0, 100.0), 2)
+
+
+def _compute_action_confidence(
+    *,
+    base_confidence: Any,
+    issue: Any,
+    root_cause: Any,
+    action_recommendation: Any,
+    noise_score: Any = 0.0,
+    fallback_used: bool = False,
+    errored: bool = False,
+) -> float:
+    confidence = _clamp_float(base_confidence, 0.0, 1.0)
+    issue_text = _coerce_text(issue, "", 180)
+    root_text = _coerce_text(root_cause, "", 220)
+    action_text = _coerce_text(action_recommendation, "", 220)
+
+    if _is_none_like(issue_text) or _is_generic_issue_label(issue_text):
+        confidence -= 0.22
+    else:
+        confidence += 0.08
+
+    if _is_none_like(root_text):
+        confidence -= 0.08
+    else:
+        confidence += 0.03
+
+    if _is_none_like(action_text):
+        confidence -= 0.10
+    else:
+        confidence += 0.05
+
+    confidence -= _clamp_float(noise_score, 0.0, 1.0) * 0.12
+
+    if fallback_used:
+        confidence = min(confidence, 0.45)
+    if errored:
+        confidence = min(confidence, 0.30)
+
+    return round(_clamp_float(confidence, 0.05, 0.99), 4)
+
+
+def _derive_actionable_pattern_label(
+    *,
+    issue: Any,
+    feature_request: Any,
+    user_suggestion: Any,
+    root_cause: Any,
+    theme_cluster: Any,
+    theme_primary: Any,
+    pain_point_category: Any,
+    text: Any,
+) -> str:
+    feature_gap_hint = _extract_feature_gap_label(
+        feature_request,
+        user_suggestion,
+        issue,
+        root_cause,
+        text,
+    )
+    label = _derive_actionable_issue_label(
+        issue,
+        feature_request,
+        user_suggestion,
+        feature_gap_hint,
+        root_cause,
+        theme_cluster,
+        theme_primary,
+        pain_point_category,
+    )
+    if _is_generic_issue_label(label):
+        return ""
+    return _compact_issue_label(label, 120)
+
+
+def _pattern_trend_direction(latest_count: int, previous_count: int) -> str:
+    latest = max(0, int(latest_count or 0))
+    previous = max(0, int(previous_count or 0))
+    if previous == 0:
+        return "rising" if latest > 0 else "stable"
+    change = (latest - previous) / previous
+    if change > 0.2:
+        return "rising"
+    if change < -0.2:
+        return "declining"
+    return "stable"
+
+
+def _pattern_recurrence_metrics(
+    *,
+    mention_count: int,
+    active_days: int,
+    avg_churn_risk: float,
+    latest_count: int,
+    previous_count: int,
+) -> Dict[str, Any]:
+    volume_component = min(1.0, max(0.0, float(mention_count) / 25.0))
+    consistency_component = min(1.0, max(0.0, float(active_days) / 14.0))
+    risk_component = min(1.0, max(0.0, float(avg_churn_risk) / 3.0))
+
+    change_ratio = (
+        1.0 if previous_count <= 0 and latest_count > 0
+        else ((latest_count - previous_count) / max(previous_count, 1))
+    )
+    momentum_component = max(-1.0, min(1.0, change_ratio))
+    trend_component = (momentum_component + 1.0) / 2.0
+
+    recurrence_score = round(
+        _clamp_float((volume_component * 0.50 + consistency_component * 0.20 + risk_component * 0.30) * 100.0, 0.0, 100.0),
+        2,
+    )
+    trend_score = round(
+        _clamp_float((trend_component * 0.55 + risk_component * 0.30 + min(1.0, latest_count / 10.0) * 0.15) * 100.0, 0.0, 100.0),
+        2,
+    )
+    recurring = bool(mention_count >= 3 and active_days >= 2)
+    return {
+        "recurring": recurring,
+        "recurrence_score": recurrence_score,
+        "trend_score": trend_score,
+        "trend_direction": _pattern_trend_direction(latest_count, previous_count),
+    }
+
+
+def _feedback_hash_text(value: Any) -> str:
+    normalized = " ".join(str(value or "").lower().split()).strip()
+    return hashlib.sha1(normalized.encode("utf-8")).hexdigest()
+
+
+def _feedback_id_from_token(value: Any) -> Optional[int]:
+    token = str(value or "").strip()
+    if not token:
+        return None
+    if token.startswith("fi_"):
+        token = token[3:]
+    try:
+        feedback_id = int(token)
+    except Exception:
+        return None
+    if feedback_id <= 0:
+        return None
+    return feedback_id
 
 
 def _trend_from_values(latest: List[float], previous: List[float], threshold: float = 0.15) -> str:
@@ -589,6 +1028,8 @@ def init_crm_tables():
             sentiment TEXT DEFAULT 'neutral',
             sentiment_score REAL DEFAULT 0.0,
             confidence REAL DEFAULT 0.0,
+            action_confidence REAL DEFAULT 0.0,
+            business_impact_score REAL DEFAULT 0.0,
             churn_risk TEXT DEFAULT 'null',
             churn_impact TEXT DEFAULT 'none',
             pain_point_category TEXT DEFAULT 'Other',
@@ -682,6 +1123,8 @@ def init_crm_tables():
             root_cause TEXT DEFAULT '',
             solving_priority TEXT DEFAULT 'medium',
             action_owner TEXT DEFAULT 'Unknown',
+            action_confidence REAL DEFAULT 0.0,
+            business_impact_score REAL DEFAULT 0.0,
             theme_primary TEXT DEFAULT 'None',
             theme_cluster TEXT DEFAULT 'None',
             cluster_label TEXT DEFAULT 'None',
@@ -692,6 +1135,31 @@ def init_crm_tables():
             FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
             FOREIGN KEY (analysis_run_id) REFERENCES fi_analysis_runs(id) ON DELETE CASCADE,
             FOREIGN KEY (feedback_id) REFERENCES fi_feedback(id) ON DELETE CASCADE
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS fi_issue_memory (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tenant_id INTEGER NOT NULL,
+            pattern_key TEXT NOT NULL,
+            pattern_label TEXT NOT NULL,
+            mention_count INTEGER DEFAULT 0,
+            churn_linked_count INTEGER DEFAULT 0,
+            high_churn_count INTEGER DEFAULT 0,
+            avg_sentiment_score REAL DEFAULT 0.0,
+            avg_churn_risk REAL DEFAULT 0.0,
+            latest_7d_count INTEGER DEFAULT 0,
+            previous_7d_count INTEGER DEFAULT 0,
+            recurring_flag INTEGER DEFAULT 0,
+            recurrence_score REAL DEFAULT 0.0,
+            trend_direction TEXT DEFAULT 'stable',
+            trend_score REAL DEFAULT 0.0,
+            first_seen_at TIMESTAMP,
+            last_seen_at TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(tenant_id, pattern_key),
+            FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
         )
     ''')
 
@@ -768,6 +1236,7 @@ def init_crm_tables():
         "CREATE INDEX IF NOT EXISTS idx_fi_feedback_sentiment ON fi_feedback(tenant_id, sentiment)",
         "CREATE INDEX IF NOT EXISTS idx_fi_issues_tenant ON fi_issues(tenant_id)",
         "CREATE INDEX IF NOT EXISTS idx_fi_issues_impact ON fi_issues(tenant_id, impact_score DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_fi_issue_memory_rank ON fi_issue_memory(tenant_id, recurrence_score DESC, trend_score DESC)",
         "CREATE INDEX IF NOT EXISTS idx_fi_customers_tenant ON fi_customers(tenant_id)",
         "CREATE INDEX IF NOT EXISTS idx_fi_kb_tenant ON fi_offer_knowledge_base(tenant_id, active, priority)",
         "CREATE INDEX IF NOT EXISTS idx_fi_delivery_connector ON fi_delivery_connectors(tenant_id, connector_type, active)",
@@ -807,8 +1276,18 @@ def init_crm_tables():
         "ALTER TABLE fi_feedback ADD COLUMN solving_priority TEXT DEFAULT 'medium'",
         "ALTER TABLE fi_feedback ADD COLUMN journey_stage TEXT DEFAULT 'unknown'",
         "ALTER TABLE fi_feedback ADD COLUMN action_owner TEXT DEFAULT 'Unknown'",
+        "ALTER TABLE fi_feedback ADD COLUMN action_confidence REAL DEFAULT 0.0",
+        "ALTER TABLE fi_feedback ADD COLUMN business_impact_score REAL DEFAULT 0.0",
         "ALTER TABLE fi_feedback ADD COLUMN last_analyzed_at TIMESTAMP",
         "ALTER TABLE fi_feedback ADD COLUMN analysis_run_id INTEGER",
+    ]:
+        try:
+            c.execute(alter_sql)
+        except Exception:
+            pass
+    for alter_sql in [
+        "ALTER TABLE fi_analysis_results ADD COLUMN action_confidence REAL DEFAULT 0.0",
+        "ALTER TABLE fi_analysis_results ADD COLUMN business_impact_score REAL DEFAULT 0.0",
     ]:
         try:
             c.execute(alter_sql)
@@ -838,8 +1317,42 @@ def init_crm_tables():
         _backfill_feedback_analysis_columns(c)
     except Exception:
         logger.exception("[FI-CRM] Failed to backfill structured feedback analysis columns")
+    try:
+        c.execute("SELECT DISTINCT tenant_id FROM fi_feedback WHERE last_analyzed_at IS NOT NULL")
+        for tenant_row in c.fetchall():
+            tenant_value = int(tenant_row["tenant_id"])
+            if tenant_value > 0:
+                _refresh_issue_pattern_memory(c, tenant_value)
+    except Exception:
+        logger.exception("[FI-CRM] Failed to refresh issue pattern memory during initialization")
     conn.commit()
 
+    
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS feedback_intelligence (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tenant_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            feedback_id INTEGER,
+            feedback TEXT NOT NULL,
+            feedback_hash TEXT NOT NULL,
+            sentiment TEXT DEFAULT 'neutral',
+            churn_risk TEXT DEFAULT 'low',
+            primary_issue TEXT DEFAULT '',
+            reason TEXT DEFAULT '',
+            best_action TEXT DEFAULT '',
+            suggested_message TEXT DEFAULT '',
+            rescue_status TEXT DEFAULT 'not_triggered',
+            rescue_provider TEXT DEFAULT 'none',
+            rescue_payload_json TEXT DEFAULT '{}',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+            FOREIGN KEY (feedback_id) REFERENCES fi_feedback(id) ON DELETE SET NULL,
+            UNIQUE(tenant_id, user_id, feedback_id),
+            UNIQUE(tenant_id, user_id, feedback_hash)
+        )
+    ''')
     for idx_sql in [
         "CREATE INDEX IF NOT EXISTS idx_fi_feedback_tenant ON fi_feedback(tenant_id)",
         "CREATE INDEX IF NOT EXISTS idx_fi_feedback_status ON fi_feedback(tenant_id, status)",
@@ -850,14 +1363,18 @@ def init_crm_tables():
         "CREATE INDEX IF NOT EXISTS idx_fi_feedback_churn ON fi_feedback(tenant_id, churn_risk, churn_impact)",
         "CREATE INDEX IF NOT EXISTS idx_fi_feedback_theme ON fi_feedback(tenant_id, theme_primary, theme_cluster)",
         "CREATE INDEX IF NOT EXISTS idx_fi_feedback_priority ON fi_feedback(tenant_id, solving_priority, priority)",
+        "CREATE INDEX IF NOT EXISTS idx_fi_feedback_analysis_state ON fi_feedback(tenant_id, last_analyzed_at, created_at DESC)",
         "CREATE INDEX IF NOT EXISTS idx_fi_issues_tenant ON fi_issues(tenant_id)",
         "CREATE INDEX IF NOT EXISTS idx_fi_issues_impact ON fi_issues(tenant_id, impact_score DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_fi_issue_memory_rank ON fi_issue_memory(tenant_id, recurrence_score DESC, trend_score DESC)",
         "CREATE INDEX IF NOT EXISTS idx_fi_customers_tenant ON fi_customers(tenant_id)",
         "CREATE INDEX IF NOT EXISTS idx_fi_fetch_runs_tenant ON fi_fetch_runs(tenant_id, completed_at DESC)",
         "CREATE INDEX IF NOT EXISTS idx_fi_analysis_runs_tenant ON fi_analysis_runs(tenant_id, completed_at DESC)",
         "CREATE INDEX IF NOT EXISTS idx_fi_analysis_results_run ON fi_analysis_results(analysis_run_id, feedback_id)",
         "CREATE INDEX IF NOT EXISTS idx_fi_kb_tenant ON fi_offer_knowledge_base(tenant_id, active, priority)",
         "CREATE INDEX IF NOT EXISTS idx_fi_outreach_tenant ON fi_outreach_drafts(tenant_id, feedback_id, created_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_feedback_intelligence_user ON feedback_intelligence(tenant_id, user_id, created_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_feedback_intelligence_churn ON feedback_intelligence(tenant_id, user_id, churn_risk, created_at DESC)",
     ]:
         try:
             c.execute(idx_sql)
@@ -904,6 +1421,8 @@ def _backfill_feedback_analysis_columns(cursor) -> None:
             UPDATE fi_feedback
             SET sentiment_score = ?,
                 confidence = ?,
+                action_confidence = ?,
+                business_impact_score = ?,
                 churn_risk = ?,
                 churn_impact = ?,
                 pain_point_category = ?,
@@ -921,6 +1440,20 @@ def _backfill_feedback_analysis_columns(cursor) -> None:
             (
                 float(analysis.get("sentiment_score", 0.0) or 0.0),
                 float(analysis.get("confidence", 0.0) or 0.0),
+                _compute_action_confidence(
+                    base_confidence=analysis.get("action_confidence", analysis.get("confidence", 0.0)),
+                    issue=analysis.get("issue"),
+                    root_cause=analysis.get("root_cause"),
+                    action_recommendation=analysis.get("action_recommendation"),
+                    noise_score=analysis.get("noise_score", 0.0),
+                    fallback_used=bool(analysis.get("fallback_reason")),
+                    errored=False,
+                ),
+                _compute_business_impact_score(
+                    churn_risk=analysis.get("churn_risk"),
+                    revenue_sensitivity=analysis.get("revenue_sensitivity", False),
+                    urgency=analysis.get("urgency"),
+                ),
                 _coerce_text(analysis.get("churn_risk"), "null", 20).lower(),
                 _coerce_text(analysis.get("churn_impact"), "none", 20).lower(),
                 _coerce_text(analysis.get("pain_point_category"), "Other", 40),
@@ -951,6 +1484,7 @@ def fi_list_feedback(
     rating_values: Optional[List[int]] = None,
     sentiment: Optional[str] = None,
     source: Optional[str] = None,
+    source_type: Optional[str] = None,
     issue_id: Optional[int] = None,
     customer_id: Optional[int] = None,
     search: Optional[str] = None,
@@ -970,6 +1504,24 @@ def fi_list_feedback(
         "LOWER(COALESCE(f.source, '')) NOT LIKE 'slack (%'",
     ]
     params: list = [tenant_id]
+    has_cxm_sources = _table_exists(c, "cxm_sources")
+    if has_cxm_sources:
+        where.append(
+            """
+            (
+                COALESCE(f.metadata_json, '') = ''
+                OR json_valid(f.metadata_json) = 0
+                OR json_extract(f.metadata_json, '$.cxm_source_id') IS NULL
+                OR EXISTS (
+                    SELECT 1
+                    FROM cxm_sources s
+                    WHERE s.id = CAST(json_extract(f.metadata_json, '$.cxm_source_id') AS INTEGER)
+                      AND s.tenant_id = f.tenant_id
+                      AND s.is_active = 1
+                )
+            )
+            """
+        )
 
     if status:
         where.append("f.status = ?")
@@ -1009,6 +1561,9 @@ def fi_list_feedback(
     if source:
         where.append("f.source = ?")
         params.append(source)
+    if source_type:
+        where.append("LOWER(COALESCE(f.source_type, '')) = ?")
+        params.append(str(source_type).strip().lower())
     if issue_id is not None:
         where.append("f.issue_id = ?")
         params.append(issue_id)
@@ -1018,12 +1573,14 @@ def fi_list_feedback(
     if search:
         where.append("f.text LIKE ?")
         params.append(f"%{search}%")
-    if start_date:
+    normalized_start_date = _normalize_filter_timestamp(start_date)
+    normalized_end_date = _normalize_filter_timestamp(end_date, end_of_day=True)
+    if normalized_start_date:
         where.append("f.created_at >= ?")
-        params.append(start_date)
-    if end_date:
+        params.append(normalized_start_date)
+    if normalized_end_date:
         where.append("f.created_at <= ?")
-        params.append(end_date)
+        params.append(normalized_end_date)
 
     where_clause = " AND ".join(where)
 
@@ -1046,16 +1603,40 @@ def fi_list_feedback(
 
     items = [dict(row) for row in c.fetchall()]
 
-    c.execute("""
+    source_where = [
+        "f.tenant_id = ?",
+        "LOWER(COALESCE(f.source_type, '')) != 'slack'",
+        "LOWER(COALESCE(f.source, '')) != 'slack'",
+        "LOWER(COALESCE(f.source, '')) NOT LIKE 'slack (%'",
+    ]
+    if has_cxm_sources:
+        source_where.append(
+            """
+            (
+                COALESCE(f.metadata_json, '') = ''
+                OR json_valid(f.metadata_json) = 0
+                OR json_extract(f.metadata_json, '$.cxm_source_id') IS NULL
+                OR EXISTS (
+                    SELECT 1
+                    FROM cxm_sources s
+                    WHERE s.id = CAST(json_extract(f.metadata_json, '$.cxm_source_id') AS INTEGER)
+                      AND s.tenant_id = f.tenant_id
+                      AND s.is_active = 1
+                )
+            )
+            """
+        )
+    source_where_clause = " AND ".join(source_where)
+    c.execute(
+        f"""
         SELECT f.source, f.source_type, COUNT(*) AS count
         FROM fi_feedback f
-        WHERE f.tenant_id = ?
-          AND LOWER(COALESCE(f.source_type, '')) != 'slack'
-          AND LOWER(COALESCE(f.source, '')) != 'slack'
-          AND LOWER(COALESCE(f.source, '')) NOT LIKE 'slack (%'
+        WHERE {source_where_clause}
         GROUP BY f.source, f.source_type
         ORDER BY count DESC, f.source ASC
-    """, (tenant_id,))
+        """,
+        (tenant_id,),
+    )
     source_options = [
         {
             "source": row["source"],
@@ -1102,6 +1683,7 @@ def fi_create_feedback(
     customer_identifier: Optional[str] = None,
     issue_id: Optional[int] = None,
     priority: str = "medium",
+    created_at: Optional[str] = None,
 ) -> int:
     """Create a feedback item. Auto-creates/links customer if identifier provided."""
     conn = get_db_connection()
@@ -1111,10 +1693,17 @@ def fi_create_feedback(
     if customer_identifier:
         customer_id = _upsert_customer(c, tenant_id, customer_identifier)
 
-    c.execute("""
-        INSERT INTO fi_feedback (tenant_id, text, sentiment, source, source_type, rating, metadata_json, customer_id, issue_id, status, priority)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?)
-    """, (tenant_id, text, sentiment, source, source_type, rating, metadata_json, customer_id, issue_id, priority))
+    created_at_value = _coerce_text(created_at, "", 64)
+    if created_at_value:
+        c.execute("""
+            INSERT INTO fi_feedback (tenant_id, text, sentiment, source, source_type, rating, metadata_json, customer_id, issue_id, status, priority, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)
+        """, (tenant_id, text, sentiment, source, source_type, rating, metadata_json, customer_id, issue_id, priority, created_at_value))
+    else:
+        c.execute("""
+            INSERT INTO fi_feedback (tenant_id, text, sentiment, source, source_type, rating, metadata_json, customer_id, issue_id, status, priority)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?)
+        """, (tenant_id, text, sentiment, source, source_type, rating, metadata_json, customer_id, issue_id, priority))
     fid = c.lastrowid
 
     # Update customer stats
@@ -1156,6 +1745,7 @@ def fi_get_feedback_records_for_analysis(
     tenant_id: int,
     *,
     feedback_ids: Optional[List[int]] = None,
+    include_analyzed: bool = True,
     source: Optional[str] = None,
     source_ids: Optional[List[int]] = None,
     start_date: Optional[str] = None,
@@ -1168,7 +1758,10 @@ def fi_get_feedback_records_for_analysis(
     limit: Optional[int] = None,
     offset: Optional[int] = None,
 ) -> List[Dict[str, Any]]:
-    """Return feedback rows with enough context for Feedback CRM analysis."""
+    """Return feedback rows with enough context for Feedback CRM analysis.
+
+    Set include_analyzed=False to return only pending rows that have never been analyzed.
+    """
     conn = get_db_connection()
     c = conn.cursor()
 
@@ -1180,6 +1773,7 @@ def fi_get_feedback_records_for_analysis(
             f.source,
             f.source_type,
             f.created_at,
+            f.last_analyzed_at,
             f.metadata_json,
             f.customer_id,
             cu.customer_identifier
@@ -1218,12 +1812,14 @@ def fi_get_feedback_records_for_analysis(
                 f" AND CAST(json_extract(f.metadata_json, '$.cxm_source_id') AS INTEGER) IN ({placeholders})"
             )
             params.extend(source_ids)
-    if start_date:
+    normalized_start_date = _normalize_filter_timestamp(start_date)
+    normalized_end_date = _normalize_filter_timestamp(end_date, end_of_day=True)
+    if normalized_start_date:
         query += " AND f.created_at >= ?"
-        params.append(start_date)
-    if end_date:
+        params.append(normalized_start_date)
+    if normalized_end_date:
         query += " AND f.created_at <= ?"
-        params.append(end_date)
+        params.append(normalized_end_date)
     normalized_ratings: List[int] = []
     if rating_values:
         seen_ratings = set()
@@ -1277,6 +1873,8 @@ def fi_get_feedback_records_for_analysis(
     if status:
         query += " AND LOWER(COALESCE(f.status, 'open')) = ?"
         params.append(str(status).strip().lower())
+    if not include_analyzed:
+        query += " AND f.last_analyzed_at IS NULL"
 
     query += " ORDER BY f.created_at DESC"
     # Exact feedback-id selection already defines the full analysis set.
@@ -1585,6 +2183,31 @@ def fi_apply_analysis_results(
             "prompt_version": FI_CRM_PROMPT_VERSION,
             "cleaning_version": FI_CRM_CLEANING_VERSION,
         }
+        analysis_payload["action_confidence"] = _compute_action_confidence(
+            base_confidence=result.get("action_confidence", analysis_payload.get("confidence", 0.0)),
+            issue=analysis_payload.get("issue"),
+            root_cause=analysis_payload.get("root_cause"),
+            action_recommendation=analysis_payload.get("action_recommendation"),
+            noise_score=analysis_payload.get("noise_score", 0.0),
+            fallback_used=bool(result.get("_meta_fallback", False)),
+            errored=bool(result.get("_meta_error", False)),
+        )
+        analysis_payload["impact_score"] = _compute_business_impact_score(
+            churn_risk=analysis_payload.get("churn_risk"),
+            revenue_sensitivity=analysis_payload.get("revenue_sensitivity", False),
+            urgency=analysis_payload.get("urgency"),
+        )
+        pattern_label = _derive_actionable_pattern_label(
+            issue=analysis_payload.get("issue"),
+            feature_request=analysis_payload.get("feature_request"),
+            user_suggestion=analysis_payload.get("user_suggestion"),
+            root_cause=analysis_payload.get("root_cause"),
+            theme_cluster=analysis_payload.get("theme_cluster"),
+            theme_primary=analysis_payload.get("theme_primary"),
+            pain_point_category=analysis_payload.get("pain_point_category"),
+            text=current.get("text"),
+        )
+        analysis_payload["pattern_key"] = _coerce_text(pattern_label.lower(), "none", 120) if pattern_label else "none"
         metadata["analysis"] = analysis_payload
         metadata["analysis_last_run_id"] = analysis_run_id
         metadata["analysis_updated_at"] = datetime.utcnow().isoformat()
@@ -1676,6 +2299,8 @@ def fi_apply_analysis_results(
                 solving_priority = ?,
                 journey_stage = ?,
                 action_owner = ?,
+                action_confidence = ?,
+                business_impact_score = ?,
                 issue_id = ?,
                 priority = ?,
                 metadata_json = ?
@@ -1697,6 +2322,8 @@ def fi_apply_analysis_results(
                 analysis_payload["solving_priority"],
                 analysis_payload["journey_stage"],
                 analysis_payload["action_owner"],
+                analysis_payload["action_confidence"],
+                analysis_payload["impact_score"],
                 issue_id,
                 analysis_payload["solving_priority"],
                 _safe_json_dumps(metadata),
@@ -1714,38 +2341,83 @@ def fi_apply_analysis_results(
             if analysis_run_id:
                 c.execute(
                     """
-                    INSERT INTO fi_analysis_results (
-                        tenant_id, analysis_run_id, feedback_id, source, source_type,
-                        sentiment, sentiment_score, churn_risk, churn_impact, pain_point_category,
-                        issue, root_cause, solving_priority, action_owner,
-                        theme_primary, theme_cluster, cluster_label, user_segment, journey_stage,
-                        metadata_json
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    SELECT id
+                    FROM fi_analysis_results
+                    WHERE tenant_id = ? AND analysis_run_id = ? AND feedback_id = ?
+                    ORDER BY id DESC
+                    LIMIT 1
                     """,
-                    (
-                        tenant_id,
-                        analysis_run_id,
-                        feedback_id,
-                        _coerce_text(result.get("source"), "", 120),
-                        _coerce_text(result.get("source_type"), "", 80),
-                        str(result.get("sentiment") or "neutral").strip().lower() or "neutral",
-                        analysis_payload["sentiment_score"],
-                        analysis_payload["churn_risk"],
-                        analysis_payload["churn_impact"],
-                        analysis_payload["pain_point_category"],
-                        analysis_payload["issue"],
-                        analysis_payload["root_cause"],
-                        analysis_payload["solving_priority"],
-                        analysis_payload["action_owner"],
-                        analysis_payload["theme_primary"],
-                        analysis_payload["theme_cluster"],
-                        analysis_payload["cluster_label"],
-                        analysis_payload["user_segment"],
-                        analysis_payload["journey_stage"],
-                        _safe_json_dumps(analysis_payload),
-                    ),
+                    (tenant_id, analysis_run_id, feedback_id),
                 )
+                existing_snapshot = c.fetchone()
+                snapshot_payload = (
+                    _coerce_text(result.get("source"), "", 120),
+                    _coerce_text(result.get("source_type"), "", 80),
+                    str(result.get("sentiment") or "neutral").strip().lower() or "neutral",
+                    analysis_payload["sentiment_score"],
+                    analysis_payload["churn_risk"],
+                    analysis_payload["churn_impact"],
+                    analysis_payload["pain_point_category"],
+                    analysis_payload["issue"],
+                    analysis_payload["root_cause"],
+                    analysis_payload["solving_priority"],
+                    analysis_payload["action_owner"],
+                    analysis_payload["action_confidence"],
+                    analysis_payload["impact_score"],
+                    analysis_payload["theme_primary"],
+                    analysis_payload["theme_cluster"],
+                    analysis_payload["cluster_label"],
+                    analysis_payload["user_segment"],
+                    analysis_payload["journey_stage"],
+                    _safe_json_dumps(analysis_payload),
+                )
+                if existing_snapshot:
+                    c.execute(
+                        """
+                        UPDATE fi_analysis_results
+                        SET source = ?,
+                            source_type = ?,
+                            sentiment = ?,
+                            sentiment_score = ?,
+                            churn_risk = ?,
+                            churn_impact = ?,
+                            pain_point_category = ?,
+                            issue = ?,
+                            root_cause = ?,
+                            solving_priority = ?,
+                            action_owner = ?,
+                            action_confidence = ?,
+                            business_impact_score = ?,
+                            theme_primary = ?,
+                            theme_cluster = ?,
+                            cluster_label = ?,
+                            user_segment = ?,
+                            journey_stage = ?,
+                            metadata_json = ?
+                        WHERE id = ? AND tenant_id = ?
+                        """,
+                        (*snapshot_payload, int(existing_snapshot["id"]), tenant_id),
+                    )
+                else:
+                    c.execute(
+                        """
+                        INSERT INTO fi_analysis_results (
+                            tenant_id, analysis_run_id, feedback_id, source, source_type,
+                            sentiment, sentiment_score, churn_risk, churn_impact, pain_point_category,
+                            issue, root_cause, solving_priority, action_owner,
+                            action_confidence, business_impact_score,
+                            theme_primary, theme_cluster, cluster_label, user_segment, journey_stage,
+                            metadata_json
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            tenant_id,
+                            analysis_run_id,
+                            feedback_id,
+                            *snapshot_payload,
+                        ),
+                    )
 
     for customer_id in touched_customer_ids:
         _refresh_customer_stats(c, customer_id)
@@ -1755,6 +2427,7 @@ def fi_apply_analysis_results(
     for issue_id in all_issue_ids:
         _refresh_issue_stats(c, tenant_id, issue_id)
         _refresh_issue_trend(c, tenant_id, issue_id)
+    pattern_memory_count = _refresh_issue_pattern_memory(c, tenant_id)
 
     conn.commit()
     conn.close()
@@ -1767,6 +2440,7 @@ def fi_apply_analysis_results(
         "auto_outreach_ready": auto_outreach_ready,
         "auto_outreach_skipped": auto_outreach_skipped,
         "analysis_run_id": analysis_run_id,
+        "pattern_memory_count": pattern_memory_count,
     }
 
 
@@ -1880,12 +2554,14 @@ def _feedback_analysis_filters_sql(
         if max_value is not None:
             where.append("f.rating <= ?")
             params.append(max_value)
-    if start_date:
+    normalized_start_date = _normalize_filter_timestamp(start_date)
+    normalized_end_date = _normalize_filter_timestamp(end_date, end_of_day=True)
+    if normalized_start_date:
         where.append("f.created_at >= ?")
-        params.append(start_date)
-    if end_date:
+        params.append(normalized_start_date)
+    if normalized_end_date:
         where.append("f.created_at <= ?")
-        params.append(end_date)
+        params.append(normalized_end_date)
 
     return " AND ".join(where), params
 
@@ -2079,6 +2755,7 @@ def fi_get_analysis_summary(
         f"""
         SELECT
             f.id,
+            f.text,
             f.sentiment,
             f.sentiment_score,
             f.churn_risk,
@@ -2106,6 +2783,8 @@ def fi_get_analysis_summary(
             "total_reviews": 0,
             "avg_sentiment": 0.0,
             "avg_churn": 0.0,
+            "avg_action_confidence": 0.0,
+            "avg_business_impact_score": 0.0,
             "positive_count": 0,
             "neutral_count": 0,
             "negative_count": 0,
@@ -2114,7 +2793,10 @@ def fi_get_analysis_summary(
             "low_churn": 0,
             "top_themes": [],
             "top_pain_points": [],
+            "top_actionable_issues": [],
             "churn_intent_clusters": [],
+            "recurring_issue_patterns": [],
+            "recurring_issue_memory": [],
             "user_segments": [],
             "growth_opportunities": [],
             "main_problem_to_fix": {
@@ -2138,10 +2820,22 @@ def fi_get_analysis_summary(
     avg_churn = round(sum(_churn_bucket_value(row.get("churn_risk")) for row in rows) / total_reviews, 4)
 
     theme_counts: Dict[str, Dict[str, Any]] = {}
+    churn_theme_counts: Dict[str, Dict[str, Any]] = {}
     pain_counts: Dict[str, Dict[str, Any]] = {}
     cluster_counts: Dict[str, Dict[str, Any]] = {}
+    churn_cluster_counts: Dict[str, Dict[str, Any]] = {}
     segment_counts: Dict[str, int] = {}
     suggestion_counts: Dict[str, int] = {}
+    actionable_issue_counts: Dict[str, Dict[str, Any]] = {}
+    churn_actionable_issue_counts: Dict[str, Dict[str, Any]] = {}
+    recurring_pattern_counts: Dict[str, Dict[str, Any]] = {}
+    action_confidence_total = 0.0
+    business_impact_total = 0.0
+    scored_rows = 0
+    now_date = datetime.utcnow().date()
+    latest_window_start = now_date - timedelta(days=6)
+    previous_window_start = now_date - timedelta(days=13)
+    previous_window_end = now_date - timedelta(days=7)
 
     ordered_sentiment_scores = [_sentiment_numeric(row.get("sentiment_score")) for row in rows]
     half = max(1, len(ordered_sentiment_scores) // 2)
@@ -2151,25 +2845,87 @@ def fi_get_analysis_summary(
     )
 
     for row in rows:
-        theme = _coerce_text(row.get("theme_cluster") or row.get("theme_primary"), "Unclassified", 120)
         pain = _coerce_text(row.get("pain_point_category"), "Other", 60)
-        cluster = _coerce_text(row.get("cluster_label") or row.get("theme_cluster"), "Unclassified", 120)
         segment = _coerce_text(row.get("user_segment"), "Neutral", 60)
         sentiment_score = _sentiment_numeric(row.get("sentiment_score"))
         churn_impact = _churn_bucket_value(row.get("churn_impact"))
         churn_risk = _churn_bucket_value(row.get("churn_risk"))
+        sentiment_name = str(row.get("sentiment") or "").strip().lower()
+        churn_linked = bool(churn_risk >= 2 or churn_impact >= 2 or sentiment_score < 0 or sentiment_name == "negative")
         metadata = _json_load_dict(row.get("metadata_json"))
         analysis_meta = metadata.get("analysis") if isinstance(metadata.get("analysis"), dict) else {}
-        suggestion = _coerce_text(
-            analysis_meta.get("user_suggestion") or analysis_meta.get("feature_request"),
-            "",
-            140,
+        analysis_issue = _coerce_text(analysis_meta.get("issue"), "", 180)
+        analysis_root_cause = _coerce_text(analysis_meta.get("root_cause"), "", 220)
+        analysis_theme_cluster = _coerce_text(analysis_meta.get("theme_cluster"), "", 140)
+        analysis_theme_primary = _coerce_text(analysis_meta.get("theme_primary"), "", 140)
+        feature_request = _coerce_text(analysis_meta.get("feature_request"), "", 160)
+        user_suggestion = _coerce_text(analysis_meta.get("user_suggestion"), "", 160)
+        action_recommendation = _coerce_text(analysis_meta.get("action_recommendation"), "", 220)
+        urgency_value = _coerce_text(analysis_meta.get("urgency"), "None", 20)
+        revenue_sensitive = bool(analysis_meta.get("revenue_sensitivity", False))
+        row_action_confidence = _compute_action_confidence(
+            base_confidence=analysis_meta.get("action_confidence", analysis_meta.get("confidence", row.get("confidence", 0.0))),
+            issue=analysis_issue or row.get("pain_point_category"),
+            root_cause=analysis_root_cause,
+            action_recommendation=action_recommendation,
+            noise_score=analysis_meta.get("noise_score", 0.0),
+            fallback_used=bool(analysis_meta.get("fallback_reason")),
+            errored=False,
         )
+        row_business_impact = _compute_business_impact_score(
+            churn_risk=row.get("churn_risk"),
+            revenue_sensitivity=revenue_sensitive,
+            urgency=urgency_value,
+        )
+        action_confidence_total += row_action_confidence
+        business_impact_total += row_business_impact
+        scored_rows += 1
+        row["_action_confidence"] = row_action_confidence
+        row["_business_impact_score"] = row_business_impact
+        feature_gap_hint = _extract_feature_gap_label(
+            feature_request,
+            user_suggestion,
+            analysis_issue,
+            analysis_root_cause,
+            row.get("text"),
+        )
+        suggestion = _derive_actionable_issue_label(user_suggestion, feature_request, feature_gap_hint)
+        actionable_issue = _derive_actionable_issue_label(
+            analysis_issue,
+            feature_request,
+            user_suggestion,
+            feature_gap_hint,
+            analysis_root_cause,
+            analysis_theme_cluster,
+            analysis_theme_primary,
+            row.get("theme_cluster"),
+            row.get("theme_primary"),
+            row.get("pain_point_category"),
+        )
+        if _is_generic_issue_label(actionable_issue):
+            actionable_issue = ""
+        row["_actionable_issue_label"] = actionable_issue
+        row["_is_churn_linked"] = churn_linked
+        theme = _coerce_text(row.get("theme_cluster") or row.get("theme_primary"), "Unclassified", 120)
+        if _is_generic_issue_label(theme) and actionable_issue:
+            theme = actionable_issue
+        cluster = _coerce_text(row.get("cluster_label") or row.get("theme_cluster"), "Unclassified", 120)
+        if _is_generic_issue_label(cluster):
+            cluster = actionable_issue or theme
+        cluster = _coerce_text(cluster, "Unclassified", 120)
 
         theme_entry = theme_counts.setdefault(theme, {"theme": theme, "count": 0, "avg_churn": 0.0, "impact_score": 0.0})
         theme_entry["count"] += 1
         theme_entry["avg_churn"] += churn_risk
         theme_entry["impact_score"] += max(churn_impact, churn_risk, 1)
+        if churn_linked:
+            churn_theme_entry = churn_theme_counts.setdefault(
+                theme,
+                {"theme": theme, "count": 0, "avg_churn": 0.0, "impact_score": 0.0},
+            )
+            churn_theme_entry["count"] += 1
+            churn_theme_entry["avg_churn"] += churn_risk
+            churn_theme_entry["impact_score"] += max(churn_impact, churn_risk, 1)
 
         pain_entry = pain_counts.setdefault(
             pain,
@@ -2179,6 +2935,59 @@ def fi_get_analysis_summary(
         pain_entry["avg_sentiment"] += sentiment_score
         pain_entry["impact_score"] += max(churn_impact, churn_risk, 1)
 
+        if actionable_issue:
+            issue_entry = actionable_issue_counts.setdefault(
+                actionable_issue,
+                {"issue_label": actionable_issue, "count": 0, "avg_sentiment": 0.0, "impact_score": 0.0},
+            )
+            issue_entry["count"] += 1
+            issue_entry["avg_sentiment"] += sentiment_score
+            issue_entry["impact_score"] += max(churn_impact, churn_risk, 1)
+            if churn_linked:
+                churn_issue_entry = churn_actionable_issue_counts.setdefault(
+                    actionable_issue,
+                    {"issue_label": actionable_issue, "count": 0, "avg_sentiment": 0.0, "impact_score": 0.0},
+                )
+                churn_issue_entry["count"] += 1
+                churn_issue_entry["avg_sentiment"] += sentiment_score
+                churn_issue_entry["impact_score"] += max(churn_impact, churn_risk, 1)
+
+            recurring_entry = recurring_pattern_counts.setdefault(
+                actionable_issue.lower(),
+                {
+                    "pattern": actionable_issue,
+                    "mention_count": 0,
+                    "churn_linked_count": 0,
+                    "high_churn_count": 0,
+                    "sentiment_sum": 0.0,
+                    "churn_risk_sum": 0.0,
+                    "latest_7d_count": 0,
+                    "previous_7d_count": 0,
+                    "active_days": set(),
+                    "first_seen_at": None,
+                    "last_seen_at": None,
+                },
+            )
+            recurring_entry["mention_count"] += 1
+            recurring_entry["sentiment_sum"] += sentiment_score
+            recurring_entry["churn_risk_sum"] += float(churn_risk)
+            if churn_linked:
+                recurring_entry["churn_linked_count"] += 1
+            if churn_risk >= 3 or churn_impact >= 3:
+                recurring_entry["high_churn_count"] += 1
+            created_date = _normalize_date(row.get("created_at"))
+            if created_date:
+                iso_day = created_date.isoformat()
+                recurring_entry["active_days"].add(iso_day)
+                if recurring_entry["first_seen_at"] is None or iso_day < recurring_entry["first_seen_at"]:
+                    recurring_entry["first_seen_at"] = iso_day
+                if recurring_entry["last_seen_at"] is None or iso_day > recurring_entry["last_seen_at"]:
+                    recurring_entry["last_seen_at"] = iso_day
+                if created_date >= latest_window_start:
+                    recurring_entry["latest_7d_count"] += 1
+                elif previous_window_start <= created_date <= previous_window_end:
+                    recurring_entry["previous_7d_count"] += 1
+
         cluster_entry = cluster_counts.setdefault(
             cluster,
             {"cluster": cluster, "count": 0, "high_churn_reviews": 0, "impact_score": 0.0},
@@ -2186,12 +2995,21 @@ def fi_get_analysis_summary(
         cluster_entry["count"] += 1
         cluster_entry["high_churn_reviews"] += 1 if churn_risk >= 3 else 0
         cluster_entry["impact_score"] += max(churn_impact, churn_risk, 1)
+        if churn_linked:
+            churn_cluster_entry = churn_cluster_counts.setdefault(
+                cluster,
+                {"cluster": cluster, "count": 0, "high_churn_reviews": 0, "impact_score": 0.0},
+            )
+            churn_cluster_entry["count"] += 1
+            churn_cluster_entry["high_churn_reviews"] += 1 if churn_risk >= 3 else 0
+            churn_cluster_entry["impact_score"] += max(churn_impact, churn_risk, 1)
 
         segment_counts[segment] = segment_counts.get(segment, 0) + 1
-        if suggestion and suggestion.lower() not in {"none", "n/a", "unknown"}:
+        if suggestion and suggestion.lower() not in {"none", "n/a", "unknown"} and not _is_generic_issue_label(suggestion):
             suggestion_counts[suggestion] = suggestion_counts.get(suggestion, 0) + 1
 
-    top_themes = sorted(
+    theme_source = churn_theme_counts if churn_theme_counts else theme_counts
+    top_themes_all = sorted(
         (
             {
                 "theme": value["theme"],
@@ -2199,10 +3017,13 @@ def fi_get_analysis_summary(
                 "avg_churn": round(value["avg_churn"] / max(value["count"], 1), 4),
                 "impact_score": round(value["impact_score"], 2),
             }
-            for value in theme_counts.values()
+            for value in theme_source.values()
         ),
         key=lambda item: (-item["impact_score"], -item["count"], item["theme"]),
-    )[:8]
+    )
+    top_themes = [item for item in top_themes_all if not _is_generic_issue_label(item.get("theme"))][:8]
+    if not top_themes:
+        top_themes = top_themes_all[:8]
 
     top_pain_points = sorted(
         (
@@ -2217,7 +3038,23 @@ def fi_get_analysis_summary(
         key=lambda item: (-item["impact_score"], -item["count"], item["pain_point"]),
     )[:8]
 
-    churn_intent_clusters = sorted(
+    actionable_source = churn_actionable_issue_counts if churn_actionable_issue_counts else actionable_issue_counts
+    top_actionable_issues = sorted(
+        (
+            {
+                "pain_point": value["issue_label"],
+                "count": value["count"],
+                "avg_sentiment": round(value["avg_sentiment"] / max(value["count"], 1), 4),
+                "impact_score": round(value["impact_score"], 2),
+            }
+            for value in actionable_source.values()
+            if not _is_generic_issue_label(value.get("issue_label"))
+        ),
+        key=lambda item: (-item["impact_score"], -item["count"], item["pain_point"]),
+    )[:8]
+
+    cluster_source = churn_cluster_counts if churn_cluster_counts else cluster_counts
+    churn_intent_clusters_all = sorted(
         (
             {
                 "cluster": value["cluster"],
@@ -2225,10 +3062,13 @@ def fi_get_analysis_summary(
                 "high_churn_reviews": value["high_churn_reviews"],
                 "impact_score": round(value["impact_score"], 2),
             }
-            for value in cluster_counts.values()
+            for value in cluster_source.values()
         ),
         key=lambda item: (-item["impact_score"], -item["count"], item["cluster"]),
-    )[:8]
+    )
+    churn_intent_clusters = [item for item in churn_intent_clusters_all if not _is_generic_issue_label(item.get("cluster"))][:8]
+    if not churn_intent_clusters:
+        churn_intent_clusters = churn_intent_clusters_all[:8]
 
     user_segments = sorted(
         ({"segment": key, "count": value} for key, value in segment_counts.items()),
@@ -2240,22 +3080,150 @@ def fi_get_analysis_summary(
         key=lambda item: (-item["count"], item["suggestion"]),
     )[:8]
 
-    main_problem = top_pain_points[0] if top_pain_points else None
-    main_problem_to_fix = {
-        "pain_point": main_problem["pain_point"] if main_problem else "none",
-        "impact_score": float(main_problem["impact_score"]) if main_problem else 0.0,
-        "affected_reviews": int(main_problem["count"]) if main_problem else 0,
-        "avg_churn_probability": round(
+    recurring_issue_patterns = []
+    for bucket in recurring_pattern_counts.values():
+        mention_count = int(bucket.get("mention_count") or 0)
+        if mention_count <= 0:
+            continue
+        avg_sentiment = float(bucket.get("sentiment_sum") or 0.0) / mention_count
+        avg_churn_risk = float(bucket.get("churn_risk_sum") or 0.0) / mention_count
+        active_days_count = len(bucket.get("active_days") or set())
+        metrics = _pattern_recurrence_metrics(
+            mention_count=mention_count,
+            active_days=active_days_count,
+            avg_churn_risk=avg_churn_risk,
+            latest_count=int(bucket.get("latest_7d_count") or 0),
+            previous_count=int(bucket.get("previous_7d_count") or 0),
+        )
+        recurring_issue_patterns.append(
+            {
+                "pattern": bucket.get("pattern"),
+                "mention_count": mention_count,
+                "churn_linked_count": int(bucket.get("churn_linked_count") or 0),
+                "high_churn_count": int(bucket.get("high_churn_count") or 0),
+                "avg_sentiment_score": round(avg_sentiment, 4),
+                "avg_churn_risk": round(avg_churn_risk, 4),
+                "latest_7d_count": int(bucket.get("latest_7d_count") or 0),
+                "previous_7d_count": int(bucket.get("previous_7d_count") or 0),
+                "first_seen_at": bucket.get("first_seen_at"),
+                "last_seen_at": bucket.get("last_seen_at"),
+                "recurring": bool(metrics["recurring"]),
+                "recurrence_score": float(metrics["recurrence_score"]),
+                "trend_direction": metrics["trend_direction"],
+                "trend_score": float(metrics["trend_score"]),
+            }
+        )
+    recurring_issue_patterns.sort(
+        key=lambda item: (
+            -(1 if item.get("recurring") else 0),
+            -float(item.get("recurrence_score") or 0.0),
+            -float(item.get("trend_score") or 0.0),
+            -int(item.get("mention_count") or 0),
+            str(item.get("pattern") or ""),
+        )
+    )
+    recurring_issue_patterns = recurring_issue_patterns[:10]
+    recurring_issue_memory = fi_get_issue_pattern_memory(tenant_id, limit=10)
+
+    avg_action_confidence = round(action_confidence_total / max(scored_rows, 1), 4) if scored_rows else 0.0
+    avg_business_impact_score = round(business_impact_total / max(scored_rows, 1), 2) if scored_rows else 0.0
+
+    main_problem_source = "none"
+    main_problem = None
+    if top_actionable_issues:
+        main_problem_source = "actionable_issue"
+        main_problem = top_actionable_issues[0]
+    elif top_themes:
+        main_problem_source = "theme_cluster"
+        main_problem = {
+            "pain_point": top_themes[0]["theme"],
+            "count": top_themes[0]["count"],
+            "impact_score": top_themes[0]["impact_score"],
+        }
+    elif top_pain_points:
+        main_problem_source = "pain_point"
+        main_problem = top_pain_points[0]
+
+    main_problem_label = _compact_issue_label(main_problem["pain_point"], 120) if main_problem else "none"
+    if main_problem and _is_generic_issue_label(main_problem_label):
+        fallback_theme_label = _compact_issue_label(top_themes[0]["theme"], 120) if top_themes else ""
+        fallback_growth_label = _compact_issue_label(growth_opportunities[0]["suggestion"], 120) if growth_opportunities else ""
+        if fallback_theme_label and not _is_generic_issue_label(fallback_theme_label):
+            main_problem_source = "theme_cluster"
+            main_problem_label = fallback_theme_label
+        elif fallback_growth_label and not _is_generic_issue_label(fallback_growth_label):
+            main_problem_source = "growth_signal"
+            main_problem_label = fallback_growth_label
+
+    if main_problem and _is_generic_issue_label(main_problem_label):
+        main_problem_source = "none"
+        main_problem = None
+        main_problem_label = "No specific churn driver identified"
+        related_rows = []
+    elif main_problem and main_problem_source == "actionable_issue":
+        related_rows = [
+            row
+            for row in rows
+            if _coerce_text(row.get("_actionable_issue_label"), "", 120) == main_problem_label
+            and bool(row.get("_is_churn_linked"))
+        ]
+    elif main_problem and main_problem_source == "theme_cluster":
+        related_rows = [
+            row
+            for row in rows
+            if _coerce_text(row.get("theme_cluster") or row.get("theme_primary"), "", 120) == main_problem_label
+            and bool(row.get("_is_churn_linked"))
+        ]
+    elif main_problem and main_problem_source == "growth_signal":
+        related_rows = [
+            row
+            for row in rows
+            if (
+                _coerce_text((_json_load_dict(row.get("metadata_json")).get("analysis") or {}).get("feature_request"), "", 120) == main_problem_label
+                or _coerce_text((_json_load_dict(row.get("metadata_json")).get("analysis") or {}).get("user_suggestion"), "", 120) == main_problem_label
+            )
+            and bool(row.get("_is_churn_linked"))
+        ]
+    elif main_problem:
+        related_rows = [
+            row
+            for row in rows
+            if _coerce_text(row.get("pain_point_category"), "Other", 60) == main_problem["pain_point"]
+            and bool(row.get("_is_churn_linked"))
+        ]
+    else:
+        related_rows = []
+
+    related_count = len(related_rows) if related_rows else int(main_problem["count"]) if main_problem else 0
+    avg_churn_probability = (
+        round(
             (
-                sum(_churn_bucket_value(row.get("churn_risk")) for row in rows if _coerce_text(row.get("pain_point_category"), "Other", 60) == main_problem["pain_point"])
-                / max(int(main_problem["count"]), 1)
+                sum(_churn_bucket_value(row.get("churn_risk")) for row in related_rows)
+                / max(related_count, 1)
             ) / 3.0,
             4,
-        ) if main_problem else 0.0,
+        )
+        if main_problem and related_count > 0
+        else 0.0
+    )
+    main_problem_to_fix = {
+        "pain_point": main_problem_label if (main_problem or main_problem_source == "none") else "none",
+        "label_type": main_problem_source,
+        "impact_score": float(main_problem["impact_score"]) if main_problem else 0.0,
+        "affected_reviews": related_count if main_problem else 0,
+        "avg_churn_probability": avg_churn_probability,
         "why_now": (
-            f"{main_problem['pain_point']} is the strongest churn-linked pain right now across {main_problem['count']} reviews."
+            (
+                f"{main_problem_label} is the strongest churn-linked issue right now across {related_count} reviews."
+                if main_problem_source in {"actionable_issue", "theme_cluster", "growth_signal"}
+                else f"{main_problem_label} is currently the strongest churn-linked category across {related_count} reviews."
+            )
             if main_problem
-            else "No dominant pain point detected."
+            else (
+                "Specific feature gap details are missing in analyzed records. Re-run analysis with force_reanalyze=true for refreshed labels."
+                if main_problem_source == "none"
+                else "No dominant pain point detected."
+            )
         ),
     }
 
@@ -2263,6 +3231,8 @@ def fi_get_analysis_summary(
         "total_reviews": total_reviews,
         "avg_sentiment": avg_sentiment,
         "avg_churn": avg_churn,
+        "avg_action_confidence": avg_action_confidence,
+        "avg_business_impact_score": avg_business_impact_score,
         "positive_count": positive_count,
         "neutral_count": neutral_count,
         "negative_count": negative_count,
@@ -2271,7 +3241,10 @@ def fi_get_analysis_summary(
         "low_churn": low_churn,
         "top_themes": top_themes,
         "top_pain_points": top_pain_points,
+        "top_actionable_issues": top_actionable_issues,
         "churn_intent_clusters": churn_intent_clusters,
+        "recurring_issue_patterns": recurring_issue_patterns,
+        "recurring_issue_memory": recurring_issue_memory,
         "user_segments": user_segments,
         "growth_opportunities": growth_opportunities,
         "main_problem_to_fix": main_problem_to_fix,
@@ -2449,6 +3422,7 @@ def fi_recalculate_all_issues(tenant_id: int):
     for row in c.fetchall():
         _refresh_issue_stats(c, tenant_id, row["id"])
         _refresh_issue_trend(c, tenant_id, row["id"])
+    _refresh_issue_pattern_memory(c, tenant_id)
     conn.commit()
     conn.close()
 
@@ -2499,6 +3473,181 @@ def fi_refresh_trends(tenant_id: int):
         _refresh_issue_trend(c, tenant_id, row["id"])
     conn.commit()
     conn.close()
+
+
+def _refresh_issue_pattern_memory(cursor, tenant_id: int) -> int:
+    if not _table_exists(cursor, "fi_issue_memory"):
+        return 0
+
+    now_date = datetime.utcnow().date()
+    latest_window_start = now_date - timedelta(days=6)
+    previous_window_start = now_date - timedelta(days=13)
+    previous_window_end = now_date - timedelta(days=7)
+
+    cursor.execute(
+        """
+        SELECT
+            f.id,
+            f.text,
+            f.sentiment,
+            f.sentiment_score,
+            f.churn_risk,
+            f.churn_impact,
+            f.created_at,
+            f.metadata_json
+        FROM fi_feedback f
+        WHERE f.tenant_id = ?
+          AND f.last_analyzed_at IS NOT NULL
+        ORDER BY f.created_at DESC
+        """,
+        (tenant_id,),
+    )
+    rows = [dict(row) for row in cursor.fetchall()]
+
+    buckets: Dict[str, Dict[str, Any]] = {}
+    for row in rows:
+        metadata = _json_load_dict(row.get("metadata_json"))
+        analysis = metadata.get("analysis") if isinstance(metadata.get("analysis"), dict) else {}
+        label = _derive_actionable_pattern_label(
+            issue=analysis.get("issue"),
+            feature_request=analysis.get("feature_request"),
+            user_suggestion=analysis.get("user_suggestion"),
+            root_cause=analysis.get("root_cause"),
+            theme_cluster=analysis.get("theme_cluster"),
+            theme_primary=analysis.get("theme_primary"),
+            pain_point_category=analysis.get("pain_point_category") or row.get("pain_point_category"),
+            text=row.get("text"),
+        )
+        if not label:
+            continue
+        key = _coerce_text(label.lower(), "", 120)
+        if not key:
+            continue
+
+        bucket = buckets.setdefault(
+            key,
+            {
+                "pattern_key": key,
+                "pattern_label": label,
+                "mention_count": 0,
+                "churn_linked_count": 0,
+                "high_churn_count": 0,
+                "sentiment_sum": 0.0,
+                "churn_risk_sum": 0.0,
+                "latest_7d_count": 0,
+                "previous_7d_count": 0,
+                "active_days": set(),
+                "first_seen_at": None,
+                "last_seen_at": None,
+            },
+        )
+
+        created_date = _normalize_date(row.get("created_at"))
+        if created_date:
+            iso_day = created_date.isoformat()
+            bucket["active_days"].add(iso_day)
+            if bucket["first_seen_at"] is None or iso_day < bucket["first_seen_at"]:
+                bucket["first_seen_at"] = iso_day
+            if bucket["last_seen_at"] is None or iso_day > bucket["last_seen_at"]:
+                bucket["last_seen_at"] = iso_day
+            if created_date >= latest_window_start:
+                bucket["latest_7d_count"] += 1
+            elif previous_window_start <= created_date <= previous_window_end:
+                bucket["previous_7d_count"] += 1
+
+        sentiment_score = _sentiment_numeric(row.get("sentiment_score"))
+        churn_risk_value = _churn_bucket_value(row.get("churn_risk"))
+        churn_impact_value = _churn_bucket_value(row.get("churn_impact"))
+        churn_linked = _is_churn_linked_signal(
+            row.get("sentiment"),
+            sentiment_score,
+            row.get("churn_risk"),
+            row.get("churn_impact"),
+        )
+
+        bucket["mention_count"] += 1
+        bucket["sentiment_sum"] += sentiment_score
+        bucket["churn_risk_sum"] += float(churn_risk_value)
+        if churn_linked:
+            bucket["churn_linked_count"] += 1
+        if churn_risk_value >= 3 or churn_impact_value >= 3:
+            bucket["high_churn_count"] += 1
+
+    cursor.execute("DELETE FROM fi_issue_memory WHERE tenant_id = ?", (tenant_id,))
+
+    inserted = 0
+    for bucket in buckets.values():
+        mention_count = int(bucket["mention_count"] or 0)
+        if mention_count <= 0:
+            continue
+        avg_sentiment = float(bucket["sentiment_sum"]) / mention_count
+        avg_churn_risk = float(bucket["churn_risk_sum"]) / mention_count
+        active_days_count = len(bucket["active_days"])
+        metrics = _pattern_recurrence_metrics(
+            mention_count=mention_count,
+            active_days=active_days_count,
+            avg_churn_risk=avg_churn_risk,
+            latest_count=int(bucket["latest_7d_count"] or 0),
+            previous_count=int(bucket["previous_7d_count"] or 0),
+        )
+
+        cursor.execute(
+            """
+            INSERT INTO fi_issue_memory (
+                tenant_id, pattern_key, pattern_label, mention_count, churn_linked_count,
+                high_churn_count, avg_sentiment_score, avg_churn_risk,
+                latest_7d_count, previous_7d_count, recurring_flag, recurrence_score,
+                trend_direction, trend_score, first_seen_at, last_seen_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            """,
+            (
+                tenant_id,
+                bucket["pattern_key"],
+                bucket["pattern_label"],
+                mention_count,
+                int(bucket["churn_linked_count"] or 0),
+                int(bucket["high_churn_count"] or 0),
+                round(avg_sentiment, 4),
+                round(avg_churn_risk, 4),
+                int(bucket["latest_7d_count"] or 0),
+                int(bucket["previous_7d_count"] or 0),
+                1 if metrics["recurring"] else 0,
+                metrics["recurrence_score"],
+                metrics["trend_direction"],
+                metrics["trend_score"],
+                bucket["first_seen_at"],
+                bucket["last_seen_at"],
+            ),
+        )
+        inserted += 1
+
+    return inserted
+
+
+def fi_get_issue_pattern_memory(tenant_id: int, limit: int = 12) -> List[Dict[str, Any]]:
+    conn = get_db_connection()
+    c = conn.cursor()
+    if not _table_exists(c, "fi_issue_memory"):
+        conn.close()
+        return []
+    c.execute(
+        """
+        SELECT
+            pattern_label, mention_count, churn_linked_count, high_churn_count,
+            avg_sentiment_score, avg_churn_risk, latest_7d_count, previous_7d_count,
+            recurring_flag, recurrence_score, trend_direction, trend_score,
+            first_seen_at, last_seen_at
+        FROM fi_issue_memory
+        WHERE tenant_id = ?
+        ORDER BY recurrence_score DESC, trend_score DESC, mention_count DESC
+        LIMIT ?
+        """,
+        (tenant_id, max(1, int(limit or 12))),
+    )
+    rows = [dict(row) for row in c.fetchall()]
+    conn.close()
+    return rows
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -2672,6 +3821,7 @@ def fi_product_health(tenant_id: int) -> Dict[str, Any]:
         (tenant_id,),
     )
     analyzed_total = c.fetchone()[0]
+    pending_total = max(0, int(total or 0) - int(analyzed_total or 0))
 
     # Negative %
     c.execute("""
@@ -2713,7 +3863,7 @@ def fi_product_health(tenant_id: int) -> Dict[str, Any]:
                i.name AS issue_name
         FROM fi_feedback f
         LEFT JOIN fi_issues i ON i.id = f.issue_id
-        WHERE f.tenant_id = ?
+        WHERE f.tenant_id = ? AND f.last_analyzed_at IS NOT NULL
         ORDER BY f.created_at DESC LIMIT 10
     """, (tenant_id,))
     recent = [dict(r) for r in c.fetchall()]
@@ -2734,11 +3884,515 @@ def fi_product_health(tenant_id: int) -> Dict[str, Any]:
     c.execute("SELECT COUNT(*) FROM fi_issues WHERE tenant_id = ?", (tenant_id,))
     issue_count = c.fetchone()[0]
 
+    # ------------------------------------------------------------------
+    # Churn Intelligence (production dashboard answer set)
+    # ------------------------------------------------------------------
+    now = datetime.utcnow()
+    driver_lookback_days = 90
+    risk_lookback_days = 30
+    trend_window_days = 7
+
+    driver_cutoff_date = (now - timedelta(days=driver_lookback_days)).strftime("%Y-%m-%d")
+    risk_cutoff_date = (now - timedelta(days=risk_lookback_days)).strftime("%Y-%m-%d")
+
+    invalid_driver_tokens = {
+        "",
+        "none",
+        "null",
+        "n/a",
+        "na",
+        "unknown",
+        "unclassified",
+    }
+
+    def _driver_label_from_row(row: Dict[str, Any]) -> str:
+        metadata = _json_load_dict(row.get("metadata_json"))
+        analysis_meta = metadata.get("analysis") if isinstance(metadata.get("analysis"), dict) else {}
+        specific_label = _derive_actionable_issue_label(
+            analysis_meta.get("issue"),
+            analysis_meta.get("feature_request"),
+            analysis_meta.get("user_suggestion"),
+            _extract_feature_gap_label(
+                analysis_meta.get("feature_request"),
+                analysis_meta.get("user_suggestion"),
+                analysis_meta.get("issue"),
+                row.get("text"),
+            ),
+            row.get("issue_name"),
+            row.get("theme_cluster"),
+            row.get("theme_primary"),
+        )
+        if specific_label and not _is_generic_issue_label(specific_label):
+            return specific_label
+        candidates = [
+            row.get("theme_cluster"),
+            row.get("theme_primary"),
+            row.get("pain_point_category"),
+            row.get("issue_name"),
+        ]
+        for value in candidates:
+            label = _coerce_text(value, "", 120)
+            if not label:
+                continue
+            lowered = label.lower()
+            if lowered in invalid_driver_tokens:
+                continue
+            if lowered == "other":
+                continue
+            return label
+        for value in candidates:
+            label = _coerce_text(value, "", 120)
+            if label and label.lower() not in invalid_driver_tokens:
+                return label
+        return "General feedback"
+
+    def _safe_int(value: Any, fallback: int = 0) -> int:
+        try:
+            return int(value)
+        except Exception:
+            return fallback
+
+    def _extract_date(value: Any):
+        text = _coerce_text(value, "", 32)
+        if len(text) >= 10 and text[4] == "-" and text[7] == "-":
+            try:
+                return datetime.strptime(text[:10], "%Y-%m-%d").date()
+            except Exception:
+                return None
+        return None
+
+    def _normalize_sentiment_name(sentiment_value: Any, sentiment_score: Any) -> str:
+        sentiment_name = str(sentiment_value or "").strip().lower()
+        if sentiment_name in {"positive", "neutral", "negative"}:
+            return sentiment_name
+        score = _sentiment_numeric(sentiment_score)
+        if score > 0.15:
+            return "positive"
+        if score < -0.15:
+            return "negative"
+        return "neutral"
+
+    def _trend_from_counts(latest_count: int, previous_count: int) -> Tuple[str, float]:
+        latest = max(0, int(latest_count or 0))
+        previous = max(0, int(previous_count or 0))
+        if previous == 0:
+            if latest > 0:
+                return "rising", 100.0
+            return "stable", 0.0
+        change = (latest - previous) / previous
+        if change > 0.2:
+            return "rising", round(change * 100.0, 1)
+        if change < -0.2:
+            return "declining", round(change * 100.0, 1)
+        return "stable", round(change * 100.0, 1)
+
+    def _risk_tier_from_score(
+        risk_score: float,
+        high_churn_flags: int,
+        recent_negative_feedback: int,
+        avg_sentiment_score: float,
+    ) -> str:
+        if high_churn_flags >= 2:
+            return "high"
+        if risk_score >= 8.0:
+            return "high"
+        if recent_negative_feedback >= 3 and avg_sentiment_score <= -0.4:
+            return "high"
+        if high_churn_flags >= 1:
+            return "medium"
+        if risk_score >= 4.0:
+            return "medium"
+        if recent_negative_feedback >= 2:
+            return "medium"
+        return "low"
+
+    def _priority_tier(priority_score: float, negative_ratio: float, frequency: int) -> str:
+        if priority_score >= 20.0 or (negative_ratio >= 0.75 and frequency >= 5):
+            return "P0"
+        if priority_score >= 10.0 or (negative_ratio >= 0.55 and frequency >= 3):
+            return "P1"
+        return "P2"
+
+    def _action_template_for_driver(driver_name: str) -> str:
+        key = str(driver_name or "").strip().lower()
+        if any(token in key for token in ("pricing", "billing", "cost", "subscription", "plan", "renewal")):
+            return "Reach out to users complaining about pricing and test packaging clarity or targeted offers."
+        if any(token in key for token in ("onboarding", "setup", "activation", "getting started", "tutorial")):
+            return "Improve onboarding step X by removing first-run friction and clarifying the value path."
+        if any(token in key for token in ("crash", "bug", "error", "stability", "performance", "reliability", "slow")):
+            return "Prioritize reliability fixes first to stop churn from unresolved product quality issues."
+        if any(token in key for token in ("support", "response", "help", "ticket", "service")):
+            return "Tighten support response SLAs and add proactive follow-up for unresolved complaints."
+        if any(token in key for token in ("integration", "api", "sync", "workflow", "feature")):
+            return "Close the highest-volume integration or feature gap blocking adoption."
+        return "Assign this theme to a fix owner and ship one measurable improvement in the next sprint."
+
+    has_feedback_metadata = _column_exists(c, "fi_feedback", "metadata_json")
+    metadata_select_sql = "f.metadata_json" if has_feedback_metadata else "'' AS metadata_json"
+
+    c.execute(
+        f"""
+        SELECT
+            f.id,
+            f.text,
+            f.sentiment,
+            f.sentiment_score,
+            f.churn_risk,
+            f.theme_cluster,
+            f.theme_primary,
+            f.pain_point_category,
+            f.issue_id,
+            f.created_at,
+            {metadata_select_sql},
+            i.name AS issue_name
+        FROM fi_feedback f
+        LEFT JOIN fi_issues i
+            ON i.id = f.issue_id AND i.tenant_id = f.tenant_id
+        WHERE f.tenant_id = ?
+          AND f.last_analyzed_at IS NOT NULL
+          AND DATE(COALESCE(f.created_at, '')) >= DATE(?)
+        ORDER BY f.created_at DESC
+        """,
+        (tenant_id, driver_cutoff_date),
+    )
+    driver_rows = [dict(row) for row in c.fetchall()]
+
+    latest_window_start = (now - timedelta(days=trend_window_days - 1)).date()
+    previous_window_start = (now - timedelta(days=(trend_window_days * 2) - 1)).date()
+    previous_window_end = (now - timedelta(days=trend_window_days)).date()
+
+    driver_buckets: Dict[str, Dict[str, Any]] = {}
+    for row in driver_rows:
+        driver_name = _driver_label_from_row(row)
+        bucket = driver_buckets.setdefault(
+            driver_name,
+            {
+                "driver": driver_name,
+                "count": 0,
+                "positive_count": 0,
+                "neutral_count": 0,
+                "negative_count": 0,
+                "high_risk_count": 0,
+                "medium_risk_count": 0,
+                "low_risk_count": 0,
+                "sentiment_score_sum": 0.0,
+                "latest_count": 0,
+                "previous_count": 0,
+                "issue_ref_counts": {},
+            },
+        )
+
+        bucket["count"] += 1
+        sentiment_name = _normalize_sentiment_name(row.get("sentiment"), row.get("sentiment_score"))
+        bucket[f"{sentiment_name}_count"] += 1
+        bucket["sentiment_score_sum"] += _sentiment_numeric(row.get("sentiment_score"))
+
+        churn_risk = str(row.get("churn_risk") or "").strip().lower()
+        if churn_risk == "high":
+            bucket["high_risk_count"] += 1
+        elif churn_risk == "medium":
+            bucket["medium_risk_count"] += 1
+        elif churn_risk == "low":
+            bucket["low_risk_count"] += 1
+
+        issue_id = _safe_int(row.get("issue_id"), 0)
+        issue_name = _coerce_text(row.get("issue_name"), "", 120)
+        if issue_id > 0:
+            issue_key = f"{issue_id}:{issue_name or ''}"
+            bucket["issue_ref_counts"][issue_key] = bucket["issue_ref_counts"].get(issue_key, 0) + 1
+
+        created_date = _extract_date(row.get("created_at"))
+        if created_date:
+            if created_date >= latest_window_start:
+                bucket["latest_count"] += 1
+            elif previous_window_start <= created_date <= previous_window_end:
+                bucket["previous_count"] += 1
+
+    top_churn_drivers: List[Dict[str, Any]] = []
+    fix_first_candidates: List[Dict[str, Any]] = []
+
+    for bucket in driver_buckets.values():
+        count = max(1, int(bucket["count"]))
+        negative_ratio = float(bucket["negative_count"]) / count
+        avg_sentiment = float(bucket["sentiment_score_sum"]) / count
+
+        weighted_churn = (
+            (bucket["high_risk_count"] * 3)
+            + (bucket["medium_risk_count"] * 2)
+            + (bucket["low_risk_count"] * 1)
+        )
+        sentiment_pressure = max(0.0, -avg_sentiment)
+        churn_driver_score = weighted_churn * (1.0 + negative_ratio + sentiment_pressure)
+
+        trend, trend_delta_pct = _trend_from_counts(bucket["latest_count"], bucket["previous_count"])
+
+        dominant_issue_id = None
+        dominant_issue_name = ""
+        if bucket["issue_ref_counts"]:
+            best_issue_key = max(
+                bucket["issue_ref_counts"].items(),
+                key=lambda item: (item[1], item[0]),
+            )[0]
+            issue_parts = best_issue_key.split(":", 1)
+            dominant_issue_id = _safe_int(issue_parts[0], 0)
+            dominant_issue_name = issue_parts[1] if len(issue_parts) > 1 else ""
+
+        top_churn_drivers.append(
+            {
+                "driver": bucket["driver"],
+                "feedback_count": bucket["count"],
+                "negative_ratio": round(negative_ratio, 4),
+                "avg_sentiment": round(avg_sentiment, 4),
+                "high_risk_count": bucket["high_risk_count"],
+                "medium_risk_count": bucket["medium_risk_count"],
+                "low_risk_count": bucket["low_risk_count"],
+                "trend": trend,
+                "trend_delta_pct": trend_delta_pct,
+                "driver_score": round(churn_driver_score, 2),
+                "issue_id": dominant_issue_id if dominant_issue_id else None,
+                "issue_name": dominant_issue_name,
+            }
+        )
+
+        frequency = int(bucket["count"])
+        negativity_score = frequency * negative_ratio
+        sentiment_penalty = frequency * max(0.0, -avg_sentiment)
+        priority_score = (
+            frequency
+            + (negativity_score * 1.4)
+            + sentiment_penalty
+            + (bucket["high_risk_count"] * 0.75)
+        )
+        fix_first_candidates.append(
+            {
+                "driver": bucket["driver"],
+                "frequency": frequency,
+                "negative_ratio": round(negative_ratio, 4),
+                "avg_sentiment": round(avg_sentiment, 4),
+                "high_risk_count": int(bucket["high_risk_count"]),
+                "priority_score": round(priority_score, 2),
+                "priority_tier": _priority_tier(priority_score, negative_ratio, frequency),
+                "issue_id": dominant_issue_id if dominant_issue_id else None,
+                "issue_name": dominant_issue_name,
+            }
+        )
+
+    top_churn_drivers.sort(
+        key=lambda item: (
+            -float(item.get("driver_score") or 0.0),
+            -int(item.get("feedback_count") or 0),
+            item.get("driver") or "",
+        )
+    )
+    top_churn_drivers = top_churn_drivers[:5]
+
+    fix_first_candidates.sort(
+        key=lambda item: (
+            -float(item.get("priority_score") or 0.0),
+            -int(item.get("frequency") or 0),
+            item.get("driver") or "",
+        )
+    )
+    fix_first_priorities = []
+    for idx, item in enumerate(fix_first_candidates[:5], start=1):
+        fix_first_priorities.append(
+            {
+                **item,
+                "rank": idx,
+                "why": (
+                    f"{item['frequency']} mentions with "
+                    f"{round(float(item['negative_ratio']) * 100.0, 1)}% negative sentiment."
+                ),
+            }
+        )
+
+    c.execute(
+        """
+        SELECT
+            f.customer_id,
+            COALESCE(cu.customer_identifier, ('customer-' || CAST(f.customer_id AS TEXT))) AS customer_identifier,
+            f.sentiment,
+            f.sentiment_score,
+            f.churn_risk,
+            f.created_at
+        FROM fi_feedback f
+        LEFT JOIN fi_customers cu
+            ON cu.id = f.customer_id AND cu.tenant_id = f.tenant_id
+        WHERE f.tenant_id = ?
+          AND f.last_analyzed_at IS NOT NULL
+          AND f.customer_id IS NOT NULL
+          AND DATE(COALESCE(f.created_at, '')) >= DATE(?)
+        ORDER BY f.customer_id ASC, f.created_at DESC
+        """,
+        (tenant_id, risk_cutoff_date),
+    )
+    risk_rows = [dict(row) for row in c.fetchall()]
+
+    customer_risk_map: Dict[int, Dict[str, Any]] = {}
+    for row in risk_rows:
+        customer_id = _safe_int(row.get("customer_id"), 0)
+        if customer_id <= 0:
+            continue
+
+        entry = customer_risk_map.setdefault(
+            customer_id,
+            {
+                "customer_id": customer_id,
+                "customer_identifier": _coerce_text(row.get("customer_identifier"), f"customer-{customer_id}", 180),
+                "total_recent_feedback": 0,
+                "recent_negative_feedback": 0,
+                "high_churn_flags": 0,
+                "medium_churn_flags": 0,
+                "low_churn_flags": 0,
+                "sentiment_sum": 0.0,
+                "sentiment_scores": [],
+                "last_feedback_at": _coerce_text(row.get("created_at"), "", 40),
+            },
+        )
+
+        entry["total_recent_feedback"] += 1
+        sentiment_name = _normalize_sentiment_name(row.get("sentiment"), row.get("sentiment_score"))
+        if sentiment_name == "negative":
+            entry["recent_negative_feedback"] += 1
+        entry["sentiment_sum"] += _sentiment_numeric(row.get("sentiment_score"))
+        entry["sentiment_scores"].append(_sentiment_numeric(row.get("sentiment_score")))
+
+        churn_risk = str(row.get("churn_risk") or "").strip().lower()
+        if churn_risk == "high":
+            entry["high_churn_flags"] += 1
+        elif churn_risk == "medium":
+            entry["medium_churn_flags"] += 1
+        elif churn_risk == "low":
+            entry["low_churn_flags"] += 1
+
+        last_feedback_at = _coerce_text(row.get("created_at"), "", 40)
+        if last_feedback_at and (not entry["last_feedback_at"] or last_feedback_at > entry["last_feedback_at"]):
+            entry["last_feedback_at"] = last_feedback_at
+
+    risk_users: List[Dict[str, Any]] = []
+    risk_summary = {"high": 0, "medium": 0, "low": 0, "total": 0}
+    for entry in customer_risk_map.values():
+        total_recent = max(1, int(entry["total_recent_feedback"]))
+        avg_sentiment = float(entry["sentiment_sum"]) / total_recent
+        sentiment_scores = entry["sentiment_scores"][:]
+        latest_scores = sentiment_scores[:3]
+        previous_scores = sentiment_scores[3:6]
+        sentiment_trend = _trend_from_values(latest_scores, previous_scores, threshold=0.1)
+
+        risk_score = (
+            (entry["high_churn_flags"] * 4.0)
+            + (entry["medium_churn_flags"] * 2.0)
+            + (entry["recent_negative_feedback"] * 1.5)
+            + max(0.0, -avg_sentiment * 3.0)
+        )
+        if sentiment_trend == "degrading":
+            risk_score += 1.5
+        elif sentiment_trend == "improving":
+            risk_score = max(0.0, risk_score - 0.5)
+
+        risk_level = _risk_tier_from_score(
+            risk_score,
+            entry["high_churn_flags"],
+            entry["recent_negative_feedback"],
+            avg_sentiment,
+        )
+
+        risk_summary[risk_level] += 1
+        risk_summary["total"] += 1
+
+        risk_users.append(
+            {
+                "customer_id": entry["customer_id"],
+                "customer_identifier": entry["customer_identifier"],
+                "risk_level": risk_level,
+                "risk_score": round(risk_score, 2),
+                "recent_negative_feedback": int(entry["recent_negative_feedback"]),
+                "high_churn_flags": int(entry["high_churn_flags"]),
+                "medium_churn_flags": int(entry["medium_churn_flags"]),
+                "avg_sentiment": round(avg_sentiment, 4),
+                "sentiment_trend": sentiment_trend,
+                "total_recent_feedback": int(entry["total_recent_feedback"]),
+                "last_feedback_at": entry["last_feedback_at"],
+            }
+        )
+
+    risk_users.sort(
+        key=lambda item: (
+            {"high": 2, "medium": 1, "low": 0}.get(item.get("risk_level"), 0) * -1,
+            -float(item.get("risk_score") or 0.0),
+            -int(item.get("recent_negative_feedback") or 0),
+            item.get("customer_identifier") or "",
+        )
+    )
+    top_at_risk_users = [item for item in risk_users if item.get("risk_level") in {"high", "medium"}][:12]
+
+    action_suggestions: List[Dict[str, Any]] = []
+    if risk_summary["high"] > 0:
+        action_suggestions.append(
+            {
+                "title": "Reach out to high-risk users immediately",
+                "action": "Contact high-risk users within 24 hours and offer targeted help or retention incentives.",
+                "priority": "immediate",
+                "owner": "Customer Success",
+                "reason": f"{risk_summary['high']} users are tagged high risk from recent negative feedback.",
+            }
+        )
+
+    used_driver_names = set()
+    for fix in fix_first_priorities[:3]:
+        driver_name = _coerce_text(fix.get("driver"), "General feedback", 120)
+        lowered = driver_name.lower()
+        if lowered in used_driver_names:
+            continue
+        used_driver_names.add(lowered)
+        action_suggestions.append(
+            {
+                "title": f"Address {driver_name}",
+                "action": _action_template_for_driver(driver_name),
+                "priority": "next sprint" if fix.get("priority_tier") == "P2" else "this sprint",
+                "owner": "Product + Engineering",
+                "reason": (
+                    f"Rank #{fix.get('rank')} with {fix.get('frequency')} mentions and "
+                    f"{round(float(fix.get('negative_ratio') or 0.0) * 100.0, 1)}% negative sentiment."
+                ),
+                "related_driver": driver_name,
+                "priority_tier": fix.get("priority_tier"),
+            }
+        )
+
+    if not action_suggestions:
+        action_suggestions.append(
+            {
+                "title": "No urgent churn actions detected",
+                "action": "Continue monitoring incoming feedback and rerun analysis after the next import cycle.",
+                "priority": "monitor",
+                "owner": "Product Operations",
+                "reason": "Insufficient analyzed data for churn-focused recommendations.",
+            }
+        )
+
+    issue_pattern_memory: List[Dict[str, Any]] = []
+    if _table_exists(c, "fi_issue_memory"):
+        c.execute(
+            """
+            SELECT
+                pattern_label, mention_count, churn_linked_count, high_churn_count,
+                recurrence_score, trend_direction, trend_score, latest_7d_count, previous_7d_count
+            FROM fi_issue_memory
+            WHERE tenant_id = ?
+            ORDER BY recurrence_score DESC, trend_score DESC, mention_count DESC
+            LIMIT 8
+            """,
+            (tenant_id,),
+        )
+        issue_pattern_memory = [dict(row) for row in c.fetchall()]
+
     conn.close()
 
     return {
         "total_feedback": total,
         "analyzed_feedback": analyzed_total,
+        "pending_feedback": pending_total,
         "negative_sentiment": neg_pct,
         "sentiment_counts": sentiment_counts,
         "top_issues": top_issues,
@@ -2747,6 +4401,35 @@ def fi_product_health(tenant_id: int) -> Dict[str, Any]:
         "status_counts": status_counts,
         "customer_count": customer_count,
         "issue_count": issue_count,
+        "churn_intelligence": {
+            "lookback_days": driver_lookback_days,
+            "risk_window_days": risk_lookback_days,
+            "generated_at": now.isoformat(),
+            "why_users_are_leaving": {
+                "summary": (
+                    "Top churn drivers ranked by risk-weighted volume, sentiment, and trend."
+                    if top_churn_drivers
+                    else "No analyzed feedback available to identify churn drivers."
+                ),
+                "top_drivers": top_churn_drivers,
+            },
+            "what_to_fix_first": {
+                "summary": (
+                    "Fix-first ranking blends issue frequency with negative sentiment pressure."
+                    if fix_first_priorities
+                    else "No fix-first priorities available yet."
+                ),
+                "prioritized_issues": fix_first_priorities,
+            },
+            "who_is_at_risk": {
+                "summary": risk_summary,
+                "users": top_at_risk_users,
+            },
+            "what_to_do_next": {
+                "actions": action_suggestions[:5],
+            },
+            "issue_pattern_memory": issue_pattern_memory,
+        },
     }
 
 
@@ -3634,6 +5317,431 @@ Requirements:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+
+def _serialize_feedback_intelligence_row(row: Any) -> Dict[str, Any]:
+    item = dict(row)
+    item["rescue_payload"] = _json_load_dict(item.get("rescue_payload_json"))
+    item.pop("rescue_payload_json", None)
+    return item
+
+
+def _upsert_feedback_intelligence_row(
+    cursor,
+    *,
+    tenant_id: int,
+    user_id: int,
+    feedback_id: Optional[int],
+    feedback_text: str,
+    intelligence: Dict[str, Any],
+    rescue_status: str,
+    rescue_provider: str,
+    rescue_payload: Optional[Dict[str, Any]] = None,
+) -> int:
+    feedback_hash = _feedback_hash_text(feedback_text)
+    existing_id = None
+    if feedback_id:
+        cursor.execute(
+            """
+            SELECT id
+            FROM feedback_intelligence
+            WHERE tenant_id = ? AND user_id = ? AND feedback_id = ?
+            """,
+            (tenant_id, user_id, int(feedback_id)),
+        )
+        row = cursor.fetchone()
+        if row:
+            existing_id = int(row["id"])
+    if not existing_id:
+        cursor.execute(
+            """
+            SELECT id
+            FROM feedback_intelligence
+            WHERE tenant_id = ? AND user_id = ? AND feedback_hash = ?
+            """,
+            (tenant_id, user_id, feedback_hash),
+        )
+        row = cursor.fetchone()
+        if row:
+            existing_id = int(row["id"])
+
+    payload_json = _safe_json_dumps(rescue_payload or {})
+    sentiment = _coerce_text(intelligence.get("sentiment"), "neutral", 20).lower()
+    churn_risk = _coerce_text(intelligence.get("churn_risk"), "low", 20).lower()
+    primary_issue = _coerce_text(intelligence.get("primary_issue"), "general frustration", 120)
+    reason = _coerce_text(intelligence.get("reason"), "", 260)
+    best_action = _coerce_text(intelligence.get("best_action"), "", 260)
+    suggested_message = _coerce_text(intelligence.get("suggested_message"), "", 500)
+    rescue_status_value = _coerce_text(rescue_status, "not_triggered", 40).lower()
+    rescue_provider_value = _coerce_text(rescue_provider, "none", 40).lower()
+
+    if existing_id:
+        cursor.execute(
+            """
+            UPDATE feedback_intelligence
+            SET feedback_id = ?,
+                feedback = ?,
+                feedback_hash = ?,
+                sentiment = ?,
+                churn_risk = ?,
+                primary_issue = ?,
+                reason = ?,
+                best_action = ?,
+                suggested_message = ?,
+                rescue_status = ?,
+                rescue_provider = ?,
+                rescue_payload_json = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ? AND tenant_id = ?
+            """,
+            (
+                feedback_id,
+                feedback_text,
+                feedback_hash,
+                sentiment,
+                churn_risk,
+                primary_issue,
+                reason,
+                best_action,
+                suggested_message,
+                rescue_status_value,
+                rescue_provider_value,
+                payload_json,
+                existing_id,
+                tenant_id,
+            ),
+        )
+        return existing_id
+
+    cursor.execute(
+        """
+        INSERT INTO feedback_intelligence (
+            tenant_id,
+            user_id,
+            feedback_id,
+            feedback,
+            feedback_hash,
+            sentiment,
+            churn_risk,
+            primary_issue,
+            reason,
+            best_action,
+            suggested_message,
+            rescue_status,
+            rescue_provider,
+            rescue_payload_json
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            tenant_id,
+            user_id,
+            feedback_id,
+            feedback_text,
+            feedback_hash,
+            sentiment,
+            churn_risk,
+            primary_issue,
+            reason,
+            best_action,
+            suggested_message,
+            rescue_status_value,
+            rescue_provider_value,
+            payload_json,
+        ),
+    )
+    return int(cursor.lastrowid)
+
+
+def fi_list_feedback_intelligence(
+    tenant_id: int,
+    user_id: int,
+    *,
+    churn_risk: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> Dict[str, Any]:
+    conn = get_db_connection()
+    c = conn.cursor()
+
+    where = ["tenant_id = ?", "user_id = ?"]
+    params: List[Any] = [tenant_id, user_id]
+    if churn_risk:
+        where.append("LOWER(COALESCE(churn_risk, 'low')) = ?")
+        params.append(_coerce_text(churn_risk, "low", 20).lower())
+    clause = " AND ".join(where)
+    resolved_limit = max(1, min(int(limit or 50), 200))
+    resolved_offset = max(0, int(offset or 0))
+
+    c.execute(f"SELECT COUNT(*) AS cnt FROM feedback_intelligence WHERE {clause}", params)
+    total = int((c.fetchone()["cnt"] or 0))
+    c.execute(
+        f"""
+        SELECT *
+        FROM feedback_intelligence
+        WHERE {clause}
+        ORDER BY updated_at DESC, id DESC
+        LIMIT ? OFFSET ?
+        """,
+        params + [resolved_limit, resolved_offset],
+    )
+    items = [_serialize_feedback_intelligence_row(row) for row in c.fetchall()]
+    conn.close()
+    return {
+        "items": items,
+        "total": total,
+        "limit": resolved_limit,
+        "offset": resolved_offset,
+    }
+
+
+def fi_analyze_feedback_intelligence(
+    tenant_id: int,
+    user_id: int,
+    *,
+    feedback_text: str = "",
+    feedback_id: Optional[int] = None,
+    customer_identifier: Optional[str] = None,
+    metadata: Optional[Dict[str, Any]] = None,
+    run_rescue: bool = True,
+    source: str = "feedback_crm",
+    fallback: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    from retention_intelligence import analyze_feedback, trigger_rescue
+
+    conn = get_db_connection()
+    c = conn.cursor()
+
+    try:
+        resolved_feedback_id = _feedback_id_from_token(feedback_id)
+        resolved_feedback_text = _coerce_text(feedback_text, "", 4000)
+        resolved_customer_identifier = _coerce_text(customer_identifier, "", 180)
+        metadata_payload = metadata if isinstance(metadata, dict) else {}
+        fallback_payload = fallback if isinstance(fallback, dict) else {}
+
+        if resolved_feedback_id:
+            c.execute(
+                """
+                SELECT
+                    f.id,
+                    f.text,
+                    f.sentiment,
+                    f.churn_risk,
+                    f.pain_point_category,
+                    f.metadata_json,
+                    cu.customer_identifier,
+                    i.name AS issue_name
+                FROM fi_feedback f
+                LEFT JOIN fi_customers cu ON cu.id = f.customer_id
+                LEFT JOIN fi_issues i ON i.id = f.issue_id
+                WHERE f.id = ? AND f.tenant_id = ?
+                """,
+                (resolved_feedback_id, tenant_id),
+            )
+            feedback_row = c.fetchone()
+            if not feedback_row:
+                raise ValueError("feedback_id not found")
+            row_payload = dict(feedback_row)
+            if not resolved_feedback_text:
+                resolved_feedback_text = _coerce_text(row_payload.get("text"), "", 4000)
+            db_metadata = _json_load_dict(row_payload.get("metadata_json"))
+            if isinstance(db_metadata, dict):
+                metadata_payload = {**db_metadata, **metadata_payload}
+            if not resolved_customer_identifier:
+                resolved_customer_identifier = _coerce_text(row_payload.get("customer_identifier"), "", 180)
+
+            fallback_payload = {
+                **{
+                    "sentiment": row_payload.get("sentiment"),
+                    "churn_risk": row_payload.get("churn_risk"),
+                    "primary_issue": row_payload.get("issue_name") or row_payload.get("pain_point_category"),
+                },
+                **fallback_payload,
+            }
+            analysis_meta = metadata_payload.get("analysis")
+            if isinstance(analysis_meta, dict):
+                for key in (
+                    "sentiment",
+                    "churn_risk",
+                    "primary_issue",
+                    "reason",
+                    "best_action",
+                    "suggested_message",
+                    "issue",
+                    "action_recommendation",
+                    "root_cause",
+                    "pain_point_category",
+                ):
+                    if key in analysis_meta and key not in fallback_payload:
+                        fallback_payload[key] = analysis_meta.get(key)
+
+        if not resolved_feedback_text:
+            raise ValueError("feedback_text is required")
+
+        feedback_hash = _feedback_hash_text(resolved_feedback_text)
+        if resolved_feedback_id:
+            c.execute(
+                """
+                SELECT *
+                FROM feedback_intelligence
+                WHERE tenant_id = ? AND user_id = ? AND feedback_id = ? AND feedback_hash = ?
+                """,
+                (tenant_id, user_id, resolved_feedback_id, feedback_hash),
+            )
+        else:
+            c.execute(
+                """
+                SELECT *
+                FROM feedback_intelligence
+                WHERE tenant_id = ? AND user_id = ? AND feedback_hash = ?
+                """,
+                (tenant_id, user_id, feedback_hash),
+            )
+        existing_row = c.fetchone()
+        if existing_row:
+            existing = _serialize_feedback_intelligence_row(existing_row)
+            existing["skipped"] = True
+            existing["rescue"] = {
+                "status": existing.get("rescue_status") or "not_triggered",
+                "provider": existing.get("rescue_provider") or "none",
+            }
+            return existing
+
+        intelligence = analyze_feedback(resolved_feedback_text, fallback=fallback_payload)
+        contact = _extract_feedback_contact(metadata_payload, resolved_customer_identifier)
+
+        rescue_result: Dict[str, Any] = {
+            "status": "not_triggered",
+            "provider": "none",
+            "reason": "churn_risk_not_high",
+        }
+        if run_rescue and _coerce_text(intelligence.get("churn_risk"), "low", 20).lower() == "high":
+            rescue_result = trigger_rescue(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                feedback_id=resolved_feedback_id,
+                contact=contact,
+                intelligence=intelligence,
+                source=source,
+            )
+
+        rescue_status = _coerce_text(rescue_result.get("status"), "not_triggered", 40)
+        rescue_provider = _coerce_text(rescue_result.get("provider"), "none", 40)
+        row_id = _upsert_feedback_intelligence_row(
+            c,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            feedback_id=resolved_feedback_id,
+            feedback_text=resolved_feedback_text,
+            intelligence=intelligence,
+            rescue_status=rescue_status,
+            rescue_provider=rescue_provider,
+            rescue_payload={
+                **rescue_result,
+                "contact": contact,
+                "source": source,
+            },
+        )
+        conn.commit()
+        return {
+            "id": row_id,
+            "feedback_id": resolved_feedback_id,
+            "feedback": resolved_feedback_text,
+            **intelligence,
+            "rescue": rescue_result,
+            "skipped": False,
+        }
+    finally:
+        conn.close()
+
+
+def fi_process_retention_intelligence_from_analysis(
+    tenant_id: int,
+    user_id: int,
+    analysis_results: List[Dict[str, Any]],
+    *,
+    run_rescue: bool = True,
+    source: str = "analysis",
+) -> Dict[str, Any]:
+    fallback_by_feedback_id: Dict[int, Dict[str, Any]] = {}
+    seen_feedback_ids = set()
+    feedback_ids: List[int] = []
+
+    for result in analysis_results or []:
+        feedback_id = _feedback_id_from_token(result.get("id") or result.get("review_id"))
+        if not feedback_id or feedback_id in seen_feedback_ids:
+            continue
+        seen_feedback_ids.add(feedback_id)
+        feedback_ids.append(feedback_id)
+        fallback_by_feedback_id[feedback_id] = {
+            "sentiment": result.get("sentiment"),
+            "churn_risk": result.get("churn_risk"),
+            "primary_issue": result.get("issue") or result.get("theme_cluster") or result.get("pain_point_category"),
+            "reason": result.get("root_cause"),
+            "best_action": result.get("action_recommendation"),
+            "suggested_message": result.get("suggested_message"),
+            "issue": result.get("issue"),
+            "action_recommendation": result.get("action_recommendation"),
+            "root_cause": result.get("root_cause"),
+            "pain_point_category": result.get("pain_point_category"),
+        }
+
+    if not feedback_ids:
+        return {
+            "processed": 0,
+            "stored": 0,
+            "skipped_existing": 0,
+            "rescue_triggered": 0,
+            "rescue_sent": 0,
+            "rescue_queued": 0,
+            "errors": [],
+        }
+
+    stored = 0
+    skipped_existing = 0
+    rescue_triggered = 0
+    rescue_sent = 0
+    rescue_queued = 0
+    errors: List[Dict[str, Any]] = []
+
+    for feedback_id in feedback_ids:
+        try:
+            outcome = fi_analyze_feedback_intelligence(
+                tenant_id,
+                user_id,
+                feedback_id=feedback_id,
+                run_rescue=run_rescue,
+                source=source,
+                fallback=fallback_by_feedback_id.get(feedback_id),
+            )
+            if outcome.get("skipped"):
+                skipped_existing += 1
+                continue
+            stored += 1
+            rescue = outcome.get("rescue") or {}
+            rescue_status = _coerce_text(rescue.get("status"), "", 40).lower()
+            if rescue_status in {"sent", "queued"}:
+                rescue_triggered += 1
+            if rescue_status == "sent":
+                rescue_sent += 1
+            elif rescue_status == "queued":
+                rescue_queued += 1
+        except Exception as exc:
+            errors.append(
+                {
+                    "feedback_id": feedback_id,
+                    "error": _coerce_text(exc, "retention_intelligence_failed", 220),
+                }
+            )
+
+    return {
+        "processed": len(feedback_ids),
+        "stored": stored,
+        "skipped_existing": skipped_existing,
+        "rescue_triggered": rescue_triggered,
+        "rescue_sent": rescue_sent,
+        "rescue_queued": rescue_queued,
+        "errors": errors,
+    }
 # BULK IMPORT — seed from existing cxm_reviews
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -3681,19 +5789,70 @@ def fi_import_from_cxm(
         placeholders = ",".join(["?"] * len(source_ids))
         query += f" AND r.source_id IN ({placeholders})"
         params.extend(source_ids)
-    if start_date:
+    normalized_start_date = _normalize_filter_timestamp(start_date)
+    normalized_end_date = _normalize_filter_timestamp(end_date, end_of_day=True)
+    if normalized_start_date:
         query += " AND r.reviewed_at >= ?"
-        params.append(start_date)
-    if end_date:
+        params.append(normalized_start_date)
+    if normalized_end_date:
         query += " AND r.reviewed_at <= ?"
-        params.append(end_date)
+        params.append(normalized_end_date)
 
     query += " ORDER BY r.reviewed_at DESC"
     c.execute(query, params)
+    source_rows = c.fetchall()
+
+    # Preload existing CRM rows once and dedupe in-memory to keep import idempotent and fast.
+    c.execute(
+        """
+        SELECT text, source, created_at, metadata_json
+        FROM fi_feedback
+        WHERE tenant_id = ?
+        """,
+        (tenant_id,),
+    )
+    existing_rows = c.fetchall()
+    existing_by_external: set = set()
+    existing_by_source_time: set = set()
+    existing_legacy: set = set()
+    for existing_row in existing_rows:
+        existing_text = str(existing_row["text"] or "").strip()
+        existing_source = str(existing_row["source"] or "").strip().lower()
+        existing_created_at = str(existing_row["created_at"] or "").strip()
+        if existing_text and existing_source and existing_created_at:
+            existing_legacy.add((existing_source, existing_text, existing_created_at))
+
+        try:
+            metadata = json.loads(existing_row["metadata_json"] or "{}")
+        except Exception:
+            metadata = {}
+        if not isinstance(metadata, dict):
+            metadata = {}
+
+        raw_source_id = metadata.get("cxm_source_id")
+        source_id_value = None
+        try:
+            source_id_value = int(str(raw_source_id).strip())
+        except (TypeError, ValueError):
+            source_id_value = None
+
+        external_id = str(
+            metadata.get("cxm_external_id")
+            or metadata.get("external_id")
+            or metadata.get("reviewId")
+            or metadata.get("id")
+            or ""
+        ).strip()
+        if source_id_value and external_id:
+            existing_by_external.add((source_id_value, external_id))
+
+        reviewed_at = str(metadata.get("cxm_reviewed_at") or existing_created_at or "").strip()
+        if source_id_value and existing_text and reviewed_at:
+            existing_by_source_time.add((source_id_value, existing_text, reviewed_at))
 
     imported = 0
     skipped = 0
-    for row in c.fetchall():
+    for row in source_rows:
         text = row["content"]
         if not text or len(text.strip()) < 3:
             skipped += 1
@@ -3710,6 +5869,22 @@ def fi_import_from_cxm(
         author = row["author"]
         rating = row["score"] if row["score"] is not None else 3
         created_at = row["reviewed_at"] or datetime.utcnow().isoformat()
+        created_at_key = str(created_at or "").strip()
+        text_key = str(text or "").strip()
+        source_id_key = int(row["source_id"])
+        external_id_key = str(row["external_id"] or "").strip()
+        source_key = str(source_label or "").strip().lower()
+
+        if external_id_key and (source_id_key, external_id_key) in existing_by_external:
+            skipped += 1
+            continue
+        if text_key and created_at_key and (source_id_key, text_key, created_at_key) in existing_by_source_time:
+            skipped += 1
+            continue
+        if text_key and created_at_key and source_key and (source_key, text_key, created_at_key) in existing_legacy:
+            skipped += 1
+            continue
+
         metadata_json = json.dumps({
             "cxm_source_id": row["source_id"],
             "cxm_source_name": source_label,
@@ -3724,15 +5899,6 @@ def fi_import_from_cxm(
             "cxm_growth_opportunity": row["growth_opportunity"] or "none",
             "cxm_main_problem_flag": bool(row["main_problem_flag"] or 0),
         })
-
-        # Dedup by source + text + timestamp so each source can be reviewed separately.
-        c.execute(
-            "SELECT id FROM fi_feedback WHERE tenant_id = ? AND source = ? AND text = ? AND created_at = ?",
-            (tenant_id, source_label, text, created_at),
-        )
-        if c.fetchone():
-            skipped += 1
-            continue
 
         customer_id = None
         if author:
@@ -3777,6 +5943,12 @@ def fi_import_from_cxm(
             ),
         )
         imported += 1
+        if external_id_key:
+            existing_by_external.add((source_id_key, external_id_key))
+        if text_key and created_at_key:
+            existing_by_source_time.add((source_id_key, text_key, created_at_key))
+            if source_key:
+                existing_legacy.add((source_key, text_key, created_at_key))
 
     c.execute("SELECT DISTINCT id FROM fi_customers WHERE tenant_id = ?", (tenant_id,))
     for crow in c.fetchall():
@@ -3791,3 +5963,5 @@ def fi_import_from_cxm(
 # ──────────────────────────────────────────────────────────────────────────────
 # CRM UTILS
 # ──────────────────────────────────────────────────────────────────────────────
+
+

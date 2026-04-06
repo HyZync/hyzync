@@ -10,6 +10,64 @@ import { apiFetch } from '../utils/api';
 
 const API_BASE = '';
 const FI_SETUP_STORAGE_KEY = 'fi_crm_setup_v1';
+const FI_NAV_VIEW_IDS = ['setup', 'feedback', 'dashboard', 'knowledge_base', 'customers'];
+const GENERIC_MAIN_PROBLEM_LABELS = new Set([
+  '',
+  'none',
+  'null',
+  'n/a',
+  'na',
+  'unknown',
+  'unclassified',
+  'other',
+  'feature',
+  'features',
+  'feature request',
+  'feature requests',
+  'feature gap',
+  'feature gaps',
+  'missing feature',
+  'missing features',
+  'missing capability',
+  'requested capability',
+  'customer suggested a missing capability',
+  'requested improvement',
+  'no major issues reported',
+  'general satisfaction',
+  'unspecified product issue',
+  'issue',
+  'issues',
+  'problem',
+  'bug',
+  'bugs',
+  'general feedback',
+]);
+const readFiSetupStorage = () => {
+  if (typeof window === 'undefined') return {};
+  try {
+    const raw = localStorage.getItem(FI_SETUP_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch (_err) {
+    return {};
+  }
+};
+const writeFiSetupStorage = (patch = {}) => {
+  if (typeof window === 'undefined') return {};
+  try {
+    const prev = readFiSetupStorage();
+    const next = { ...prev, ...patch };
+    localStorage.setItem(FI_SETUP_STORAGE_KEY, JSON.stringify(next));
+    return next;
+  } catch (_err) {
+    return {};
+  }
+};
+const isFiSetupComplete = (snapshot = null) => {
+  const state = snapshot && typeof snapshot === 'object' ? snapshot : readFiSetupStorage();
+  return Boolean(state?.setup_complete || state?.setup_completed_once);
+};
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 const sentimentColor = (s) => ({ positive: 'emerald', negative: 'rose', neutral: 'slate' }[s] || 'slate');
@@ -92,6 +150,95 @@ const formatDateTimeLabel = (value) => {
   }
   const fallback = String(value || '').replace('T', ' ').slice(0, 16);
   return fallback || 'N/A';
+};
+const encodeFeedbackSourceFilter = (source, sourceType = '') => {
+  const sourceValue = String(source || '').trim();
+  if (!sourceValue) return '';
+  return JSON.stringify({
+    source: sourceValue,
+    sourceType: String(sourceType || '').trim(),
+  });
+};
+const decodeFeedbackSourceFilter = (value) => {
+  const raw = String(value || '').trim();
+  if (!raw) {
+    return { source: '', sourceType: '' };
+  }
+  if (!raw.startsWith('{')) {
+    return { source: raw, sourceType: '' };
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    return {
+      source: String(parsed?.source || '').trim(),
+      sourceType: String(parsed?.sourceType || '').trim(),
+    };
+  } catch (_err) {
+    return { source: raw, sourceType: '' };
+  }
+};
+const normalizeSelectedStars = (values) => Array.from(
+  new Set(
+    (Array.isArray(values) ? values : [])
+      .map((value) => Number(value))
+      .filter((value) => Number.isInteger(value) && value >= 1 && value <= 5)
+  )
+).sort((a, b) => a - b);
+const normalizePositiveInteger = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : null;
+};
+const normalizeNonNegativeInteger = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : 0;
+};
+const isGenericMainProblemLabel = (value) => GENERIC_MAIN_PROBLEM_LABELS.has(String(value || '').trim().toLowerCase());
+const resolveFeedbackWindow = ({
+  startIndex,
+  endIndex,
+  maxCount,
+  pageOffset = 0,
+  pageSize = 100,
+  totalAvailable = null,
+}) => {
+  const normalizedStart = normalizePositiveInteger(startIndex);
+  const normalizedEnd = normalizePositiveInteger(endIndex);
+  const normalizedCount = normalizePositiveInteger(maxCount);
+  const normalizedPageSize = Math.max(1, Math.min(5000, normalizePositiveInteger(pageSize) || 100));
+  const normalizedPageOffset = normalizeNonNegativeInteger(pageOffset);
+
+  const windowStart = normalizedStart && normalizedEnd
+    ? Math.min(normalizedStart, normalizedEnd)
+    : normalizedStart || 1;
+  const windowEnd = normalizedStart && normalizedEnd
+    ? Math.max(normalizedStart, normalizedEnd)
+    : normalizedEnd;
+
+  let windowTotal = null;
+  if (windowEnd) {
+    windowTotal = Math.max(0, windowEnd - windowStart + 1);
+  } else if (normalizedStart && Number.isFinite(Number(totalAvailable))) {
+    windowTotal = Math.max(0, Number(totalAvailable) - windowStart + 1);
+  }
+  if (normalizedCount) {
+    windowTotal = windowTotal === null ? normalizedCount : Math.min(windowTotal, normalizedCount);
+  }
+
+  const safeRelativeOffset = windowTotal === null
+    ? normalizedPageOffset
+    : Math.min(normalizedPageOffset, Math.max(0, windowTotal - 1));
+  const remaining = windowTotal === null ? null : Math.max(0, windowTotal - safeRelativeOffset);
+  const requestLimit = remaining === null
+    ? normalizedPageSize
+    : Math.min(normalizedPageSize, remaining);
+
+  return {
+    windowStart,
+    windowTotal,
+    relativeOffset: safeRelativeOffset,
+    absoluteOffset: Math.max(0, windowStart - 1 + safeRelativeOffset),
+    requestLimit,
+  };
 };
 const CONTACT_EMAIL_KEYS = new Set([
   'email',
@@ -206,6 +353,9 @@ const summarizeLlmEndpointError = (value) => {
   const text = String(value || '').trim();
   if (!text) return '';
   const lower = text.toLowerCase();
+  if (lower.includes('1033') || lower.includes('530')) {
+    return 'The remote LLM tunnel DNS route is failing (Cloudflare 1033/530). Check OLLAMA_URL or start a local standby endpoint.';
+  }
   if (lower.includes('forcibly closed') || lower.includes('connection reset') || lower.includes('10054') || lower.includes('protocolerror')) {
     return 'The remote LLM server closed the connection unexpectedly. The tunnel needs to recover.';
   }
@@ -248,15 +398,16 @@ const ConnectorTypeGlyph = ({ connectorType, size = 12, className = '' }) => {
 // ── Main Component ──────────────────────────────────────────────────────────
 const FeedbackCRM = ({ user, onBack = null }) => {
   const [activeView, setActiveView] = useState(() => {
-    try {
-      if (typeof window === 'undefined') return 'setup';
-      const raw = localStorage.getItem(FI_SETUP_STORAGE_KEY);
-      if (!raw) return 'setup';
-      return 'setup';
-    } catch (_err) {
-      return 'setup';
+    const saved = readFiSetupStorage();
+    const setupDone = isFiSetupComplete(saved);
+    const rawSavedView = String(saved?.last_active_view || '').trim().toLowerCase();
+    const savedView = rawSavedView === 'issues' ? 'dashboard' : rawSavedView;
+    if (FI_NAV_VIEW_IDS.includes(savedView) && !(setupDone && savedView === 'setup')) {
+      return savedView;
     }
+    return setupDone ? 'feedback' : 'setup';
   });
+  const [setupComplete, setSetupComplete] = useState(() => isFiSetupComplete(readFiSetupStorage()));
   const [dashboard, setDashboard] = useState(null);
   const [feedback, setFeedback] = useState({ items: [], total: 0, limit: 100, offset: 0 });
   const [issues, setIssues] = useState({ items: [], total: 0 });
@@ -269,7 +420,6 @@ const FeedbackCRM = ({ user, onBack = null }) => {
   const [filterStatus, setFilterStatus] = useState('');
   const [filterSentiment, setFilterSentiment] = useState('');
   const [filterPriority, setFilterPriority] = useState('');
-  const [filterRating, setFilterRating] = useState('');
   const [filterSource, setFilterSource] = useState('');
   const [filterStartDate, setFilterStartDate] = useState('');
   const [filterEndDate, setFilterEndDate] = useState('');
@@ -298,6 +448,13 @@ const FeedbackCRM = ({ user, onBack = null }) => {
   const [analysisResultModalOpen, setAnalysisResultModalOpen] = useState(false);
   const [analysisResultSummary, setAnalysisResultSummary] = useState(null);
   const [analysisResultFilters, setAnalysisResultFilters] = useState(null);
+  const [postFetchAnalysisPrompt, setPostFetchAnalysisPrompt] = useState({
+    open: false,
+    connectorCount: 0,
+    imported: 0,
+    skipped: 0,
+    pendingCount: 0,
+  });
   const [analysisPaused, setAnalysisPaused] = useState(false);
   const [analysisStopping, setAnalysisStopping] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -332,6 +489,28 @@ const FeedbackCRM = ({ user, onBack = null }) => {
     autoDraftReason: '',
     customerName: '',
   });
+  const openProductHealthDashboard = useCallback(() => {
+    setDetailView(null);
+    setSelectedItem(null);
+    setAnalysisOverlayOpen(false);
+    setAnalysisResultModalOpen(false);
+    setActiveView('dashboard');
+    if (typeof window !== 'undefined') {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }, []);
+  const openPostFetchAnalysisPrompt = useCallback((payload = {}) => {
+    setPostFetchAnalysisPrompt({
+      open: true,
+      connectorCount: Math.max(0, Number(payload?.connectorCount || 0)),
+      imported: Math.max(0, Number(payload?.imported || 0)),
+      skipped: Math.max(0, Number(payload?.skipped || 0)),
+      pendingCount: Math.max(0, Number(payload?.pendingCount || 0)),
+    });
+  }, []);
+  const closePostFetchAnalysisPrompt = useCallback(() => {
+    setPostFetchAnalysisPrompt((prev) => ({ ...prev, open: false }));
+  }, []);
   const llmConnected = !!llmSettings?.preferences?.is_enabled;
   const llmEndpointActive = !!llmSettings?.endpoint?.active;
   const llmGateway = llmSettings?.gateway || null;
@@ -360,18 +539,26 @@ const FeedbackCRM = ({ user, onBack = null }) => {
     setFilterStatus('');
     setFilterSentiment('');
     setFilterPriority('');
-    setFilterRating('');
     setFilterSource('');
     setFilterStartDate('');
     setFilterEndDate('');
+    setAnalysisLimit('');
+    setAnalysisStartIndex('');
+    setAnalysisEndIndex('');
+    setAnalysisSelectedStars([]);
     setFeedbackOffset(0);
   };
 
   const fetchDashboard = useCallback(async () => {
     try {
       const res = await apiFetch(`${API_BASE}/api/fi/dashboard`);
-      if (res.ok) setDashboard(await res.json());
+      if (res.ok) {
+        const payload = await res.json();
+        setDashboard(payload);
+        return payload;
+      }
     } catch (e) { console.error('Dashboard fetch error:', e); }
+    return null;
   }, []);
 
   const fetchFeedback = useCallback(async (overrides = {}) => {
@@ -382,32 +569,55 @@ const FeedbackCRM = ({ user, onBack = null }) => {
       const status = overrides.status ?? filterStatus;
       const sentiment = overrides.sentiment ?? filterSentiment;
       const priority = overrides.priority ?? filterPriority;
-      const rating = overrides.rating ?? filterRating;
-      const source = overrides.source ?? filterSource;
+      const sourceSelection = decodeFeedbackSourceFilter(overrides.source ?? filterSource);
+      const source = sourceSelection.source;
+      const sourceType = sourceSelection.sourceType;
       const startDate = overrides.startDate ?? filterStartDate;
       const endDate = overrides.endDate ?? filterEndDate;
-      const limit = Math.max(25, Math.min(500, Number(overrides.limit ?? feedbackLimit) || 100));
-      const offset = Math.max(0, Number(overrides.offset ?? feedbackOffset) || 0);
+      const ratingValues = normalizeSelectedStars(overrides.ratingValues ?? analysisSelectedStars);
+      const requestedPageSize = Math.max(1, Math.min(500, Number(overrides.limit ?? feedbackLimit) || 100));
+      const requestedOffset = Math.max(0, Number(overrides.offset ?? feedbackOffset) || 0);
+      const windowSelection = resolveFeedbackWindow({
+        startIndex: overrides.startIndex ?? analysisStartIndex,
+        endIndex: overrides.endIndex ?? analysisEndIndex,
+        maxCount: overrides.maxCount ?? analysisLimit,
+        pageOffset: requestedOffset,
+        pageSize: requestedPageSize,
+        totalAvailable: null,
+      });
       if (search) params.set('search', search);
       if (status) params.set('status', status);
       if (sentiment) params.set('sentiment', sentiment);
       if (priority) params.set('priority', priority);
-      if (rating) params.set('rating', rating);
       if (source) params.set('source', source);
+      if (sourceType) params.set('source_type', sourceType);
       if (startDate) params.set('start_date', startDate);
       if (endDate) params.set('end_date', endDate);
-      params.set('limit', String(limit));
-      params.set('offset', String(offset));
+      if (ratingValues.length > 0) params.set('rating_values', ratingValues.join(','));
+      params.set('limit', String(Math.max(1, windowSelection.requestLimit || requestedPageSize)));
+      params.set('offset', String(windowSelection.absoluteOffset));
       const res = await apiFetch(`${API_BASE}/api/fi/feedback?${params}`);
       if (res.ok) {
         const payload = await res.json();
-        setFeedback(payload);
-        setFeedbackLimit(Number(payload?.limit || limit));
-        setFeedbackOffset(Number(payload?.offset || offset));
+        const resolvedWindow = resolveFeedbackWindow({
+          startIndex: overrides.startIndex ?? analysisStartIndex,
+          endIndex: overrides.endIndex ?? analysisEndIndex,
+          maxCount: overrides.maxCount ?? analysisLimit,
+          pageOffset: requestedOffset,
+          pageSize: requestedPageSize,
+          totalAvailable: Number(payload?.total || 0),
+        });
+        setFeedback({
+          ...payload,
+          selection_total: resolvedWindow.windowTotal ?? Number(payload?.total || 0),
+          selection_offset: resolvedWindow.relativeOffset,
+        });
+        setFeedbackLimit(requestedPageSize);
+        setFeedbackOffset(resolvedWindow.relativeOffset);
       }
     } catch (e) { console.error(e); }
     setLoading(false);
-  }, [searchQuery, filterStatus, filterSentiment, filterPriority, filterRating, filterSource, filterStartDate, filterEndDate, feedbackLimit, feedbackOffset]);
+  }, [searchQuery, filterStatus, filterSentiment, filterPriority, filterSource, filterStartDate, filterEndDate, analysisSelectedStars, analysisLimit, analysisStartIndex, analysisEndIndex, feedbackLimit, feedbackOffset]);
 
   const fetchIssues = useCallback(async () => {
     setLoading(true);
@@ -568,8 +778,13 @@ const FeedbackCRM = ({ user, onBack = null }) => {
         });
         return next;
       });
-    } catch (e) { console.error(e); }
-    setLoading(false);
+      return nextConnectors;
+    } catch (e) {
+      console.error(e);
+      return [];
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   const fetchLlmState = useCallback(async (forceRefresh = false) => {
@@ -646,9 +861,7 @@ const FeedbackCRM = ({ user, onBack = null }) => {
 
   useEffect(() => {
     try {
-      const raw = localStorage.getItem(FI_SETUP_STORAGE_KEY);
-      if (!raw) return;
-      const saved = JSON.parse(raw);
+      const saved = readFiSetupStorage();
       if (Array.isArray(saved.selected_connector_ids)) {
         const ids = saved.selected_connector_ids
           .map(v => Number(v))
@@ -669,15 +882,47 @@ const FeedbackCRM = ({ user, onBack = null }) => {
     }
   }, []);
 
+  useEffect(() => {
+    writeFiSetupStorage({ last_active_view: activeView });
+  }, [activeView]);
+
   useEffect(() => { fetchDashboard(); }, [fetchDashboard]);
+  useEffect(() => { fetchConnectors(); }, [fetchConnectors]);
   useEffect(() => { fetchLlmState(); }, [fetchLlmState]);
   useEffect(() => {
+    const refreshFast = llmGatewayMode === 'unavailable';
+    const intervalMs = refreshFast ? 15000 : 45000;
+    const timer = window.setInterval(() => {
+      fetchLlmState(refreshFast);
+    }, intervalMs);
+    return () => window.clearInterval(timer);
+  }, [fetchLlmState, llmGatewayMode]);
+  useEffect(() => {
+    const refreshNow = () => {
+      fetchLlmState(true);
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') refreshNow();
+    };
+    window.addEventListener('focus', refreshNow);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      window.removeEventListener('focus', refreshNow);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
+  }, [fetchLlmState]);
+  useEffect(() => {
     if (activeView === 'feedback') fetchFeedback();
-    else if (activeView === 'issues') fetchIssues();
     else if (activeView === 'customers') fetchCustomers();
     else if (activeView === 'setup') fetchConnectors();
     else if (activeView === 'knowledge_base') fetchKnowledgeOffers();
-  }, [activeView, fetchFeedback, fetchIssues, fetchCustomers, fetchConnectors, fetchKnowledgeOffers]);
+  }, [activeView, fetchFeedback, fetchCustomers, fetchConnectors, fetchKnowledgeOffers]);
+
+  useEffect(() => {
+    if (!connectors.length || setupComplete) return;
+    writeFiSetupStorage({ setup_complete: true, setup_completed_once: true });
+    setSetupComplete(true);
+  }, [connectors.length, setupComplete]);
 
   useEffect(() => {
     if (detailView !== 'customer' || !selectedItem) return undefined;
@@ -759,6 +1004,8 @@ const FeedbackCRM = ({ user, onBack = null }) => {
         }
 
         if (data.status === 'completed') {
+          setAnalysisProgress(100);
+          setAnalysisStatus('Analysis complete. Opening Product Health Dashboard...');
           setAnalysisNotice(data.message || 'Feedback CRM analysis completed.');
           setAnalysisTaskId('');
           setAnalysisPaused(false);
@@ -766,13 +1013,23 @@ const FeedbackCRM = ({ user, onBack = null }) => {
           const summary = await fetchAnalysisResultSummary(analysisResultFilters || {});
           if (summary) {
             setAnalysisResultSummary(summary);
+          }
+          const [dashboardPayload] = await Promise.all([fetchDashboard(), fetchFeedback(), fetchCustomers()]);
+          const totalFeedback = Math.max(0, Number(dashboardPayload?.total_feedback || 0));
+          const analyzedFeedback = Math.max(0, Number(dashboardPayload?.analyzed_feedback || 0));
+          const pendingFeedback = Math.max(0, totalFeedback - analyzedFeedback);
+          const selectedCount = Array.isArray(analysisResultFilters?.feedbackIds)
+            ? analysisResultFilters.feedbackIds.length
+            : Math.max(0, processedCount);
+          setAnalysisNotice(
+            pendingFeedback > 0
+              ? `Analysis completed for ${selectedCount.toLocaleString()} review(s). ${pendingFeedback.toLocaleString()} review(s) are still left to analyze.`
+              : `Analysis completed for ${selectedCount.toLocaleString()} review(s). All fetched reviews are now analyzed.`
+          );
+          openProductHealthDashboard();
+          if (summary) {
             setAnalysisResultModalOpen(true);
           }
-          await Promise.all([fetchDashboard(), fetchFeedback(), fetchIssues(), fetchCustomers()]);
-          setActiveView('dashboard');
-          timerId = window.setTimeout(() => {
-            if (!cancelled) setAnalysisOverlayOpen(false);
-          }, 900);
           return;
         }
 
@@ -797,7 +1054,7 @@ const FeedbackCRM = ({ user, onBack = null }) => {
       cancelled = true;
       if (timerId) window.clearTimeout(timerId);
     };
-  }, [analysisTaskId, analysisResultFilters, fetchAnalysisResultSummary, fetchCustomers, fetchDashboard, fetchFeedback, fetchIssues]);
+  }, [analysisTaskId, analysisResultFilters, fetchAnalysisResultSummary, fetchCustomers, fetchDashboard, fetchFeedback, openProductHealthDashboard]);
 
   const handleAnalysisTaskControl = async (action) => {
     if (!analysisTaskId) return;
@@ -829,7 +1086,6 @@ const FeedbackCRM = ({ user, onBack = null }) => {
     setRefreshing(true);
     try { await apiFetch(`${API_BASE}/api/fi/refresh`, { method: 'POST' }); } catch {}
     await fetchDashboard();
-    if (activeView === 'issues') await fetchIssues();
     if (activeView === 'feedback') await fetchFeedback();
     setRefreshing(false);
   };
@@ -843,17 +1099,20 @@ const FeedbackCRM = ({ user, onBack = null }) => {
   const saveSetupPreferences = () => {
     setSavingSetup(true);
     try {
-      const raw = localStorage.getItem(FI_SETUP_STORAGE_KEY);
-      const prev = raw ? JSON.parse(raw) : {};
-      localStorage.setItem(FI_SETUP_STORAGE_KEY, JSON.stringify({
-        ...prev,
+      const nextSetupComplete = setupComplete || selectedConnectorIds.length > 0;
+      writeFiSetupStorage({
         selected_connector_ids: selectedConnectorIds,
         scope: fetchScope,
         days: Number(fetchDays) || 7,
         start_date: rangeStart,
         end_date: rangeEnd,
-      }));
-      setSetupMessage('Source selection saved.');
+        setup_complete: nextSetupComplete,
+        setup_completed_once: setupComplete || nextSetupComplete,
+      });
+      setSetupComplete(nextSetupComplete);
+      setSetupMessage(nextSetupComplete
+        ? 'Settings saved. Sources can be edited anytime from Settings.'
+        : 'Source selection saved.');
     } catch (e) {
       setSetupMessage('Could not save setup preferences.');
       console.error(e);
@@ -902,16 +1161,13 @@ const FeedbackCRM = ({ user, onBack = null }) => {
     }
 
     try {
-      const raw = localStorage.getItem(FI_SETUP_STORAGE_KEY);
-      const prev = raw ? JSON.parse(raw) : {};
-      localStorage.setItem(FI_SETUP_STORAGE_KEY, JSON.stringify({
-        ...prev,
+      writeFiSetupStorage({
         selected_connector_ids: fetchPayload.connector_ids,
         scope: fetchScope,
         days: Number(fetchDays) || 7,
         start_date: rangeStart,
         end_date: rangeEnd,
-      }));
+      });
     } catch (e) {
       console.error('Failed to persist FI setup before import', e);
     }
@@ -943,24 +1199,18 @@ const FeedbackCRM = ({ user, onBack = null }) => {
         if (data?.post_process_error) {
           message += ` Post-process warning: ${data.post_process_error}.`;
         }
-        const fetchedSourceLabels = Array.isArray(data?.connectors)
-          ? data.connectors
-            .map(item => String(item?.source_label || '').trim())
-            .filter(Boolean)
-          : [];
         try {
-          const raw = localStorage.getItem(FI_SETUP_STORAGE_KEY);
-          const prev = raw ? JSON.parse(raw) : {};
-          localStorage.setItem(FI_SETUP_STORAGE_KEY, JSON.stringify({
-            ...prev,
+          writeFiSetupStorage({
             selected_connector_ids: fetchPayload.connector_ids,
             scope: fetchScope,
             days: Number(fetchDays) || 7,
             start_date: rangeStart,
             end_date: rangeEnd,
             setup_complete: true,
+            setup_completed_once: true,
             last_fetched_at: new Date().toISOString(),
-          }));
+          });
+          setSetupComplete(true);
         } catch (_err) {}
         const postFetchNote = connectorCount > 0
           ? (llmConnected
@@ -974,7 +1224,7 @@ const FeedbackCRM = ({ user, onBack = null }) => {
         setDetailView(null);
         setSelectedItem(null);
         setActiveView('feedback');
-        await Promise.all([
+        const [dashboardPayload] = await Promise.all([
           fetchDashboard(),
           fetchConnectors(),
           fetchFeedback({
@@ -982,16 +1232,28 @@ const FeedbackCRM = ({ user, onBack = null }) => {
             status: '',
             sentiment: '',
             priority: '',
-            rating: '',
             source: '',
             offset: 0,
           }),
         ]);
         if (connectorCount > 0) {
           if (llmConnected) {
-            setAnalysisNotice('Fetch completed. Apply filters and click Run Analysis to start CRM analysis.');
+            const totalAfterFetch = Math.max(0, Number(dashboardPayload?.total_feedback || 0));
+            const analyzedAfterFetch = Math.max(0, Number(dashboardPayload?.analyzed_feedback || 0));
+            const pendingAfterFetch = Math.max(0, totalAfterFetch - analyzedAfterFetch);
+            if (pendingAfterFetch > 0) {
+              openPostFetchAnalysisPrompt({
+                connectorCount,
+                imported: Number(data?.imported || 0),
+                skipped: Number(data?.skipped || 0),
+                pendingCount: pendingAfterFetch,
+              });
+              setAnalysisNotice(`Fetch completed. ${pendingAfterFetch.toLocaleString()} review(s) are waiting for analysis.`);
+            } else {
+              setAnalysisNotice('Fetch completed. No unanalyzed reviews are pending.');
+            }
           } else {
-        setAnalysisNotice('Reviews fetched successfully. LLM usage is paused, so CRM analysis is currently unavailable.');
+            setAnalysisNotice('Reviews fetched successfully. LLM usage is paused, so CRM analysis is currently unavailable.');
           }
         }
       } else {
@@ -1014,8 +1276,10 @@ const FeedbackCRM = ({ user, onBack = null }) => {
       setConnectorIntervals(prev => ({ ...prev, [sourceId]: fetchInterval || 'manual' }));
       setConnectorAnalysisIntervals(prev => ({ ...prev, [sourceId]: analysisInterval || 'manual' }));
     }
+    writeFiSetupStorage({ setup_complete: true, setup_completed_once: true });
+    setSetupComplete(true);
     await fetchConnectors();
-    setSetupMessage('Connector added and selected. Initial fetch will include all selected connectors.');
+    setSetupMessage('Connector added. Setup is complete and source controls stay available in Settings.');
   };
 
   const handleConnectorRemovedFromSetup = async (connectorId) => {
@@ -1037,8 +1301,11 @@ const FeedbackCRM = ({ user, onBack = null }) => {
         setSetupMessage(data?.detail || 'Failed to remove connector.');
         return;
       }
-      await fetchConnectors();
+      const nextConnectors = await fetchConnectors();
       setSelectedConnectorIds(prev => prev.filter(id => id !== connectorId));
+      if (!Array.isArray(nextConnectors) || nextConnectors.length === 0) {
+        writeFiSetupStorage({ selected_connector_ids: [] });
+      }
       setSetupMessage(scope === 'workspace' ? 'Workspace source removed.' : 'Connector removed from Feedback CRM.');
     } catch (e) {
       setSetupMessage(`Failed to remove connector: ${e.message}`);
@@ -1285,30 +1552,39 @@ const FeedbackCRM = ({ user, onBack = null }) => {
       return;
     }
     try {
-      const sourceFilter = Object.prototype.hasOwnProperty.call(options, 'source')
-        ? (options.source ?? null)
-        : null;
+      const sourceSelection = decodeFeedbackSourceFilter(
+        Object.prototype.hasOwnProperty.call(options, 'source')
+          ? (options.source ?? '')
+          : filterSource
+      );
+      const sourceFilter = sourceSelection.source || null;
+      const sourceTypeFilter = sourceSelection.sourceType || null;
       const selectedSourceIds = Array.isArray(options.sourceIds) && options.sourceIds.length
         ? options.sourceIds
         : null;
-      const startDateFilter = options.startDate || filterStartDate || null;
-      const endDateFilter = options.endDate || filterEndDate || null;
-      const ratingFilter = options.rating || (filterRating ? Number(filterRating) : null);
-      const requestedRatingValues = Array.isArray(options.ratingValues) && options.ratingValues.length > 0
+      const startDateFilter = Object.prototype.hasOwnProperty.call(options, 'startDate')
+        ? (options.startDate || null)
+        : (filterStartDate || null);
+      const endDateFilter = Object.prototype.hasOwnProperty.call(options, 'endDate')
+        ? (options.endDate || null)
+        : (filterEndDate || null);
+      const requestedRatingValues = Object.prototype.hasOwnProperty.call(options, 'ratingValues')
         ? options.ratingValues
         : analysisSelectedStars;
-      const ratingValuesFilter = Array.from(
-        new Set(
-          (requestedRatingValues || [])
-            .map((value) => Number(value))
-            .filter((value) => Number.isInteger(value) && value >= 1 && value <= 5)
-        )
-      ).sort((a, b) => a - b);
-      const effectiveSingleRating = ratingValuesFilter.length === 0 && Number.isFinite(Number(ratingFilter))
-        ? Number(ratingFilter)
-        : null;
+      const ratingValuesFilter = normalizeSelectedStars(Array.isArray(requestedRatingValues) ? requestedRatingValues : []);
 
-      const statusFilter = options.status || filterStatus || null;
+      const statusFilter = Object.prototype.hasOwnProperty.call(options, 'status')
+        ? (options.status || null)
+        : (filterStatus || null);
+      const searchFilter = Object.prototype.hasOwnProperty.call(options, 'search')
+        ? String(options.search || '').trim()
+        : String(searchQuery || '').trim();
+      const sentimentFilter = Object.prototype.hasOwnProperty.call(options, 'sentiment')
+        ? (options.sentiment || null)
+        : (filterSentiment || null);
+      const priorityFilter = Object.prototype.hasOwnProperty.call(options, 'priority')
+        ? (options.priority || null)
+        : (filterPriority || null);
       const requestedStartIndex = Number.isFinite(Number(options.startIndex))
         ? Number(options.startIndex)
         : Number(analysisStartIndex);
@@ -1328,68 +1604,106 @@ const FeedbackCRM = ({ user, onBack = null }) => {
       if (hasStartIndex && hasEndIndex) {
         const start = Math.min(requestedStartIndex, requestedEndIndex);
         const end = Math.max(requestedStartIndex, requestedEndIndex);
+        const rangeSize = Math.max(1, Math.floor(end - start + 1));
         offsetFilter = Math.max(0, Math.floor(start - 1));
-        limitFilter = Math.max(1, Math.floor(end - start + 1));
+        limitFilter = baseLimit ? Math.min(baseLimit, rangeSize) : rangeSize;
       } else if (hasStartIndex) {
         offsetFilter = Math.max(0, Math.floor(requestedStartIndex - 1));
+        limitFilter = baseLimit;
       } else if (hasEndIndex && !baseLimit) {
         limitFilter = Math.max(1, Math.floor(requestedEndIndex));
+      } else if (hasEndIndex && baseLimit) {
+        limitFilter = Math.min(baseLimit, Math.max(1, Math.floor(requestedEndIndex)));
       }
 
       const resolveSelectedFeedbackIds = async () => {
-        const params = new URLSearchParams();
-        const searchFilter = String(searchQuery || '').trim();
-        const sentimentFilter = filterSentiment || null;
-        const priorityFilter = filterPriority || null;
+        const selectionBatchSize = 5000;
         const resolvedOffset = Number.isFinite(Number(offsetFilter)) ? Math.max(0, Math.floor(Number(offsetFilter))) : 0;
-        const filteredTotal = Math.max(0, Number(feedback?.total || 0));
-        let resolvedLimit = Number.isFinite(Number(limitFilter)) && Number(limitFilter) > 0
+        const explicitLimit = Number.isFinite(Number(limitFilter)) && Number(limitFilter) > 0
           ? Math.max(1, Math.min(5000, Math.floor(Number(limitFilter))))
-          : Math.max(1, Math.min(5000, filteredTotal > resolvedOffset ? filteredTotal - resolvedOffset : filteredTotal));
-        if (!resolvedLimit && Array.isArray(feedback?.items)) {
-          resolvedLimit = Math.max(1, Math.min(5000, feedback.items.length));
-        }
+          : null;
 
-        if (searchFilter) params.set('search', searchFilter);
-        if (statusFilter) params.set('status', statusFilter);
-        if (sentimentFilter) params.set('sentiment', sentimentFilter);
-        if (priorityFilter) params.set('priority', priorityFilter);
-        if (sourceFilter) params.set('source', sourceFilter);
-        if (startDateFilter) params.set('start_date', startDateFilter);
-        if (endDateFilter) params.set('end_date', endDateFilter);
-        if (ratingValuesFilter.length > 0) {
-          params.set('rating_values', ratingValuesFilter.join(','));
-        } else if (Number.isFinite(Number(effectiveSingleRating))) {
-          params.set('rating', String(Number(effectiveSingleRating)));
-        }
-        params.set('limit', String(resolvedLimit));
-        params.set('offset', String(resolvedOffset));
+        const buildBaseParams = () => {
+          const params = new URLSearchParams();
+          if (searchFilter) params.set('search', searchFilter);
+          if (statusFilter) params.set('status', statusFilter);
+          if (sentimentFilter) params.set('sentiment', sentimentFilter);
+          if (priorityFilter) params.set('priority', priorityFilter);
+          if (sourceFilter) params.set('source', sourceFilter);
+          if (sourceTypeFilter) params.set('source_type', sourceTypeFilter);
+          if (startDateFilter) params.set('start_date', startDateFilter);
+          if (endDateFilter) params.set('end_date', endDateFilter);
+          if (ratingValuesFilter.length > 0) {
+            params.set('rating_values', ratingValuesFilter.join(','));
+          }
+          return params;
+        };
 
-        const selectionRes = await apiFetch(`${API_BASE}/api/fi/feedback?${params.toString()}`, {}, { retries: 0, timeoutMs: 60000 });
-        const selectionData = await parseApiResponse(selectionRes);
-        if (!selectionRes.ok) {
-          throw new Error(selectionData?.detail || `Failed to resolve selected reviews (HTTP ${selectionRes.status}).`);
-        }
-        const selectedIds = Array.isArray(selectionData?.items)
-          ? selectionData.items
-            .map((item) => Number(item?.id))
-            .filter((id) => Number.isInteger(id) && id > 0)
-          : [];
-        if (!selectedIds.length) {
+        const fetchSelectionPage = async (limit, offset) => {
+          const params = buildBaseParams();
+          params.set('limit', String(Math.max(1, Math.min(selectionBatchSize, Number(limit) || selectionBatchSize))));
+          params.set('offset', String(Math.max(0, Number(offset) || 0)));
+          const selectionRes = await apiFetch(`${API_BASE}/api/fi/feedback?${params.toString()}`, {}, { retries: 0, timeoutMs: 60000 });
+          const selectionData = await parseApiResponse(selectionRes);
+          if (!selectionRes.ok) {
+            throw new Error(selectionData?.detail || `Failed to resolve selected reviews (HTTP ${selectionRes.status}).`);
+          }
+          return selectionData || {};
+        };
+
+        const firstPage = await fetchSelectionPage(
+          explicitLimit ? Math.min(selectionBatchSize, explicitLimit) : selectionBatchSize,
+          resolvedOffset
+        );
+        const totalMatching = Math.max(0, Number(firstPage?.total || 0));
+        const availableFromOffset = Math.max(0, totalMatching - resolvedOffset);
+        const targetCount = explicitLimit ? Math.min(explicitLimit, availableFromOffset) : availableFromOffset;
+        if (targetCount <= 0) {
           throw new Error('No reviews matched the current analysis selection.');
         }
-        return selectedIds;
+
+        const selectedIds = [];
+        const seen = new Set();
+        const appendIds = (items = []) => {
+          items.forEach((item) => {
+            const id = Number(item?.id);
+            if (!Number.isInteger(id) || id <= 0 || seen.has(id)) return;
+            seen.add(id);
+            selectedIds.push(id);
+          });
+        };
+
+        appendIds(Array.isArray(firstPage?.items) ? firstPage.items : []);
+        while (selectedIds.length < targetCount) {
+          const remaining = targetCount - selectedIds.length;
+          const nextPage = await fetchSelectionPage(
+            Math.min(selectionBatchSize, remaining),
+            resolvedOffset + selectedIds.length
+          );
+          const nextItems = Array.isArray(nextPage?.items) ? nextPage.items : [];
+          if (!nextItems.length) break;
+          const beforeAppend = selectedIds.length;
+          appendIds(nextItems);
+          if (selectedIds.length === beforeAppend) break;
+        }
+
+        const finalIds = selectedIds.slice(0, targetCount);
+        if (!finalIds.length) {
+          throw new Error('No reviews matched the current analysis selection.');
+        }
+        return finalIds;
       };
 
       const selectedFeedbackIds = await resolveSelectedFeedbackIds();
+      closePostFetchAnalysisPrompt();
 
       setAnalysisResultFilters({
         feedbackIds: selectedFeedbackIds,
         source: sourceFilter,
+        sourceType: sourceTypeFilter,
         sourceIds: selectedSourceIds,
         startDate: startDateFilter,
         endDate: endDateFilter,
-        rating: Number.isFinite(Number(effectiveSingleRating)) ? Number(effectiveSingleRating) : null,
         ratingValues: ratingValuesFilter,
       });
       setAnalysisResultModalOpen(false);
@@ -1406,16 +1720,15 @@ const FeedbackCRM = ({ user, onBack = null }) => {
       setAnalysisOverlayOpen(true);
       const res = await apiFetch(`${API_BASE}/api/fi/analyze`, {
         method: 'POST',
-        body: JSON.stringify({
-          feedback_ids: selectedFeedbackIds,
-          source: sourceFilter,
-          source_ids: selectedSourceIds,
-          start_date: startDateFilter,
-          end_date: endDateFilter,
-          rating: Number.isFinite(Number(effectiveSingleRating)) ? Number(effectiveSingleRating) : null,
-          rating_values: ratingValuesFilter.length ? ratingValuesFilter : null,
-          status: statusFilter,
-          limit: null,
+          body: JSON.stringify({
+            feedback_ids: selectedFeedbackIds,
+            source: sourceFilter,
+            source_ids: selectedSourceIds,
+            start_date: startDateFilter,
+            end_date: endDateFilter,
+            rating_values: ratingValuesFilter.length ? ratingValuesFilter : null,
+            status: statusFilter,
+            limit: null,
           offset: null,
           vertical: 'generic',
         }),
@@ -1432,6 +1745,42 @@ const FeedbackCRM = ({ user, onBack = null }) => {
       setAnalysisNotice(e.message || 'Failed to trigger analysis.');
       setAnalysisOverlayOpen(false);
     }
+  };
+
+  const runAnalyzeAllPending = async ({ closePrompt = false } = {}) => {
+    if (closePrompt) closePostFetchAnalysisPrompt();
+    clearFeedbackFilters();
+    setDetailView(null);
+    setSelectedItem(null);
+    setActiveView('feedback');
+    await triggerInboxAnalysis({
+      search: '',
+      status: '',
+      sentiment: '',
+      priority: '',
+      source: '',
+      startDate: null,
+      endDate: null,
+      ratingValues: [],
+      startIndex: null,
+      endIndex: null,
+      limit: null,
+    });
+  };
+
+  const runAnalyzeAllFromPrompt = async () => {
+    await runAnalyzeAllPending({ closePrompt: true });
+  };
+
+  const useFiltersFromPrompt = () => {
+    const pendingCount = Math.max(0, Number(postFetchAnalysisPrompt?.pendingCount || 0));
+    closePostFetchAnalysisPrompt();
+    setActiveView('feedback');
+    setAnalysisNotice(
+      pendingCount > 0
+        ? `${pendingCount.toLocaleString()} review(s) are pending analysis. Apply filters in Feedback Inbox and click Run Analysis.`
+        : 'Apply filters in Feedback Inbox and click Run Analysis.'
+    );
   };
 
   const viewIssueDetail = async (issueId) => {
@@ -1661,12 +2010,110 @@ const FeedbackCRM = ({ user, onBack = null }) => {
   };
 
   const navItems = [
-    { id: 'setup', label: 'Source Setup', icon: Plug, color: 'violet' },
-    { id: 'knowledge_base', label: 'Offer KB', icon: Tag, color: 'fuchsia' },
-    { id: 'dashboard', label: 'Dashboard', icon: BarChart3, color: 'indigo' },
+    { id: 'setup', label: setupComplete ? 'Settings' : 'Source Setup', icon: Plug, color: 'violet' },
     { id: 'feedback', label: 'Feedback Inbox', icon: Inbox, color: 'blue' },
-    { id: 'issues', label: 'Issues', icon: AlertTriangle, color: 'amber' },
+    { id: 'dashboard', label: 'Dashboard', icon: BarChart3, color: 'indigo' },
+    { id: 'knowledge_base', label: 'Offer KB', icon: Tag, color: 'fuchsia' },
     { id: 'customers', label: 'Customers', icon: Users, color: 'emerald' },
+  ];
+
+  const navigateToView = useCallback((nextView) => {
+    let targetView = String(nextView || '').trim().toLowerCase();
+    if (targetView === 'issues') targetView = 'dashboard';
+    if (!FI_NAV_VIEW_IDS.includes(targetView)) return;
+    setDetailView(null);
+    setSelectedItem(null);
+    setActiveView(targetView);
+  }, []);
+  const totalFeedbackCount = Math.max(0, Number(dashboard?.total_feedback || feedback?.total || 0));
+  const analyzedFeedbackCount = Math.max(0, Number(dashboard?.analyzed_feedback || 0));
+  const pendingFeedbackCount = Math.max(0, Number(dashboard?.pending_feedback ?? (totalFeedbackCount - analyzedFeedbackCount)));
+  const issueCount = Math.max(0, Number(dashboard?.issue_count || 0));
+  const customerCount = Math.max(0, Number(dashboard?.customer_count || customers?.total || 0));
+  const analysisCoveragePct = totalFeedbackCount > 0
+    ? Math.round((Math.min(analyzedFeedbackCount, totalFeedbackCount) / totalFeedbackCount) * 100)
+    : 0;
+  const activeNavItem = navItems.find((item) => item.id === activeView) || navItems[0];
+  const activeViewMeta = ({
+    setup: {
+      title: setupComplete ? 'CRM Settings' : 'One-Time Source Setup',
+      description: setupComplete
+        ? 'Manage source connections, fetch windows, and CRM analysis controls from settings.'
+        : 'Complete your source setup once during onboarding, then manage changes from settings.',
+    },
+    knowledge_base: {
+      title: 'Retention Knowledge Base',
+      description: 'Curate offers and intervention playbooks used for AI-assisted customer outreach.',
+    },
+    dashboard: {
+      title: 'Product Health Dashboard',
+      description: 'Monitor sentiment, churn risk signals, and issue momentum in one executive view.',
+    },
+    feedback: {
+      title: 'Feedback Intelligence Inbox',
+      description: 'Triage, filter, and analyze customer feedback from all connected review channels.',
+    },
+    customers: {
+      title: 'Customer Risk Timeline',
+      description: 'Review sentiment history and prepare targeted retention outreach for at-risk users.',
+    },
+  }[activeView] || {
+    title: activeNavItem.label,
+    description: 'Feedback CRM workspace',
+  });
+  const navItemBadges = {
+    setup: setupComplete
+      ? `${connectors.length} source${connectors.length === 1 ? '' : 's'}`
+      : connectors.length > 0
+        ? 'Finish setup'
+        : 'Setup required',
+    knowledge_base: `${Math.max(0, Number(knowledgeOffers?.total || knowledgeOffers?.items?.length || 0))} offers`,
+    dashboard: `${analysisCoveragePct}% covered`,
+    feedback: `${totalFeedbackCount.toLocaleString()} reviews`,
+    customers: `${customerCount.toLocaleString()} customers`,
+  };
+  const workflowSteps = [
+    {
+      id: 'setup',
+      title: setupComplete ? 'Settings' : 'Connect Sources',
+      subtitle: setupComplete
+        ? `${connectors.length.toLocaleString()} source${connectors.length === 1 ? '' : 's'} connected`
+        : `${connectors.length.toLocaleString()} source${connectors.length === 1 ? '' : 's'} linked`,
+      status: setupComplete ? 'complete' : 'current',
+      onClick: () => navigateToView('setup'),
+      actionLabel: setupComplete ? 'Open settings' : 'Complete setup',
+    },
+    {
+      id: 'fetch',
+      title: 'Fetch Reviews',
+      subtitle: totalFeedbackCount > 0 ? `${totalFeedbackCount.toLocaleString()} reviews in CRM` : 'Import latest reviews',
+      status: totalFeedbackCount > 0 ? 'complete' : 'current',
+      onClick: () => handleFetchIntoCRM({ showAlert: false }),
+      actionLabel: refreshing ? 'Fetching...' : 'Fetch now',
+      disabled: refreshing,
+    },
+    {
+      id: 'analyze',
+      title: 'Analyze Feedback',
+      subtitle: pendingFeedbackCount > 0
+        ? `${pendingFeedbackCount.toLocaleString()} waiting for analysis`
+        : `${analyzedFeedbackCount.toLocaleString()} analyzed`,
+      status: analysisTaskId ? 'current' : pendingFeedbackCount === 0 && analyzedFeedbackCount > 0 ? 'complete' : 'current',
+      onClick: () => {
+        if (analysisTaskId) return;
+        runAnalyzeAllPending();
+      },
+      actionLabel: analysisTaskId ? 'Running...' : 'Analyze all',
+      disabled: !llmConnected || Boolean(analysisTaskId),
+    },
+    {
+      id: 'monitor',
+      title: 'Monitor Health',
+      subtitle: `${issueCount.toLocaleString()} issues, ${customerCount.toLocaleString()} customers`,
+      status: activeView === 'dashboard' ? 'current' : analyzedFeedbackCount > 0 ? 'complete' : 'current',
+      onClick: openProductHealthDashboard,
+      actionLabel: 'Open dashboard',
+    },
   ];
 
   // ── Detail Views ────────────────────────────────────────────────────────
@@ -1758,214 +2205,439 @@ const FeedbackCRM = ({ user, onBack = null }) => {
     ? sentimentDisplayForFeedback(latestCustomerFeedback)
     : { label: 'No feedback yet', className: 'bg-slate-100 text-slate-500 border-slate-200' };
   const analysisSummary = analysisResultSummary || {};
+  const mainProblemToFix = analysisSummary?.main_problem_to_fix || {};
+  const topActionableIssues = Array.isArray(analysisSummary?.top_actionable_issues)
+    ? analysisSummary.top_actionable_issues
+    : [];
+  const topActionableIssue = topActionableIssues[0] || null;
+  const topChurnClusters = Array.isArray(analysisSummary?.churn_intent_clusters)
+    ? analysisSummary.churn_intent_clusters
+    : [];
+  const topPainPoints = Array.isArray(analysisSummary?.top_pain_points)
+    ? analysisSummary.top_pain_points
+    : [];
+  const firstSpecificActionableIssue = topActionableIssues.find((item) => !isGenericMainProblemLabel(item?.pain_point));
+  const firstSpecificChurnCluster = topChurnClusters.find((item) => !isGenericMainProblemLabel(item?.cluster));
+  const firstSpecificPainPoint = topPainPoints.find((item) => !isGenericMainProblemLabel(item?.pain_point));
+  const rawMainProblemLabel = String(mainProblemToFix?.pain_point || '').trim();
+  const isMainProblemLabelGeneric = isGenericMainProblemLabel(rawMainProblemLabel);
+  const resolvedMainProblemLabel = (
+    (!rawMainProblemLabel || isMainProblemLabelGeneric) && firstSpecificActionableIssue?.pain_point
+      ? String(firstSpecificActionableIssue.pain_point).trim()
+      : ((!rawMainProblemLabel || isMainProblemLabelGeneric) && firstSpecificChurnCluster?.cluster
+        ? String(firstSpecificChurnCluster.cluster).trim()
+        : ((!rawMainProblemLabel || isMainProblemLabelGeneric) && firstSpecificPainPoint?.pain_point
+          ? String(firstSpecificPainPoint.pain_point).trim()
+          : rawMainProblemLabel))
+  ) || 'No specific churn driver identified';
+  const resolvedMainProblemLabelGeneric = isGenericMainProblemLabel(resolvedMainProblemLabel);
+  const resolvedMainProblemAffectedReviews = Number(
+    mainProblemToFix?.affected_reviews
+      || firstSpecificActionableIssue?.count
+      || firstSpecificChurnCluster?.count
+      || firstSpecificPainPoint?.count
+      || topActionableIssue?.count
+      || 0
+  );
+  const resolvedMainProblemImpactScore = Number(
+    mainProblemToFix?.impact_score
+      || firstSpecificActionableIssue?.impact_score
+      || firstSpecificChurnCluster?.impact_score
+      || firstSpecificPainPoint?.impact_score
+      || topActionableIssue?.impact_score
+      || 0
+  );
+  const resolvedMainProblemWhyNow = (() => {
+    if (mainProblemToFix?.why_now && !isMainProblemLabelGeneric && !resolvedMainProblemLabelGeneric) {
+      return mainProblemToFix.why_now;
+    }
+    if (resolvedMainProblemLabel && !resolvedMainProblemLabelGeneric && resolvedMainProblemAffectedReviews > 0) {
+      return `${resolvedMainProblemLabel} is the strongest churn-linked issue right now across ${resolvedMainProblemAffectedReviews} reviews.`;
+    }
+    if (resolvedMainProblemLabelGeneric || !resolvedMainProblemLabel) {
+      return 'Specific churn driver labels are missing in these analyzed records. Re-run analysis with Force Reanalyze enabled.';
+    }
+    return mainProblemToFix?.why_now || 'No dominant pain point detected.';
+  })();
+  const churnDriverCards = (() => {
+    const actionableCards = topActionableIssues
+      .filter((item) => !isGenericMainProblemLabel(item?.pain_point))
+      .slice(0, 6)
+      .map((item) => ({
+        label: item.pain_point,
+        count: item.count,
+        impact: item.impact_score,
+      }));
+    if (actionableCards.length > 0) return actionableCards;
+
+    const clusterCards = topChurnClusters
+      .filter((item) => !isGenericMainProblemLabel(item?.cluster))
+      .slice(0, 6)
+      .map((item) => ({
+        label: item.cluster,
+        count: item.count,
+        impact: item.impact_score,
+      }));
+    if (clusterCards.length > 0) return clusterCards;
+
+    const painPointCards = topPainPoints
+      .filter((item) => !isGenericMainProblemLabel(item?.pain_point))
+      .slice(0, 6)
+      .map((item) => ({
+        label: item.pain_point,
+        count: item.count,
+        impact: item.impact_score,
+      }));
+    if (painPointCards.length > 0) return painPointCards;
+
+    return topPainPoints
+      .slice(0, 6)
+      .map((item) => ({
+        label: item.pain_point,
+        count: item.count,
+        impact: item.impact_score,
+      }));
+  })();
+  const avgActionConfidence = Math.max(0, Math.min(1, Number(analysisSummary?.avg_action_confidence || 0)));
+  const avgBusinessImpact = Math.max(0, Math.min(100, Number(analysisSummary?.avg_business_impact_score || 0)));
+  const recurringIssuePatterns = (
+    Array.isArray(analysisSummary?.recurring_issue_patterns) && analysisSummary.recurring_issue_patterns.length > 0
+      ? analysisSummary.recurring_issue_patterns
+      : (Array.isArray(analysisSummary?.recurring_issue_memory) ? analysisSummary.recurring_issue_memory : [])
+  ).slice(0, 6);
   const analysisTotalReviewsValue = Math.max(0, Number(analysisSummary?.total_reviews || 0));
   const positivePct = analysisTotalReviewsValue > 0 ? Math.round((Number(analysisSummary?.positive_count || 0) / analysisTotalReviewsValue) * 100) : 0;
   const neutralPct = analysisTotalReviewsValue > 0 ? Math.round((Number(analysisSummary?.neutral_count || 0) / analysisTotalReviewsValue) * 100) : 0;
   const negativePct = analysisTotalReviewsValue > 0 ? Math.round((Number(analysisSummary?.negative_count || 0) / analysisTotalReviewsValue) * 100) : 0;
+  const analysisNoticeTone = /fail|error|unavailable|paused|stop/i.test(analysisNotice || '')
+    ? 'border-amber-200 bg-amber-50 text-amber-900'
+    : 'border-emerald-200 bg-emerald-50 text-emerald-900';
+  const analysisProgressPct = Math.max(0, Math.min(100, Number(analysisProgress) || 0));
 
   // ── Main Layout ─────────────────────────────────────────────────────────
   return (
-    <div className="flex h-full bg-[#f7f8fa] overflow-hidden">
-      {/* Left Nav */}
-      <div className="w-56 bg-white border-r border-slate-200/80 flex flex-col shrink-0 py-4 px-3">
-        {typeof onBack === 'function' && (
-          <button
-            onClick={onBack}
-            className="mb-3 flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-[12px] font-semibold text-slate-600 transition-colors hover:bg-slate-50 hover:text-slate-900"
-          >
-            <ArrowLeft size={14} />
-            Back to Home
-          </button>
-        )}
-        <div className="flex items-center gap-2.5 px-3 mb-6">
-          <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-indigo-600 to-violet-600 flex items-center justify-center shadow-lg shadow-indigo-600/25">
-            <Activity size={15} className="text-white" />
-          </div>
-          <div className="flex flex-col">
-            <span className="font-bold text-[14px] tracking-tight text-slate-900 leading-none">Feedback CRM</span>
-            <span className="text-[9px] text-slate-400 font-medium tracking-wider uppercase">Intelligence</span>
-          </div>
-        </div>
-        <div className="space-y-0.5 flex-1">
-          {navItems.map(item => (
-            <button key={item.id} onClick={() => { setActiveView(item.id); setDetailView(null); setSelectedItem(null); }}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13px] font-medium transition-all duration-200 ${activeView === item.id ? 'bg-indigo-50 text-indigo-700 font-semibold shadow-sm border border-indigo-100' : 'text-slate-600 hover:bg-slate-50 border border-transparent'}`}>
-              <item.icon size={17} className={activeView === item.id ? 'text-indigo-600' : 'text-slate-400'} />
-              {item.label}
-            </button>
-          ))}
-        </div>
-        <div className="space-y-1 pt-4 border-t border-slate-100">
-          <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 mb-2">
+    <div className="flex h-full flex-col overflow-hidden bg-slate-100 lg:flex-row">
+      <aside className="w-full shrink-0 border-b border-slate-200/90 bg-gradient-to-b from-slate-50 to-white lg:w-[304px] lg:border-b-0 lg:border-r lg:border-slate-200/80">
+        <div className="h-full overflow-y-auto px-4 py-5 sm:px-5 lg:px-4 custom-scrollbar">
+          <div className="rounded-2xl border border-slate-200/80 bg-white px-3.5 py-3.5 shadow-sm">
             <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">LLM Usage</p>
-                <p className="mt-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">Current Status</p>
-                <p className="text-[12px] font-semibold text-slate-900">
-                  {llmGatewayStatusLabel}
-                </p>
-                {llmGatewayWarning && (
-                  <p className="mt-1 text-[10px] text-amber-600 line-clamp-2" title={String(llmGatewayWarning)}>
-                    {String(llmGatewayWarning)}
-                  </p>
-                )}
-                {llmConnected && !llmEndpointActive && llmEndpointError && (
-                  <p className="mt-1 text-[10px] text-rose-500 line-clamp-2" title={String(llmEndpointError)}>
-                    {String(llmEndpointError)}
-                  </p>
-                )}
+              <div className="flex items-center gap-2.5">
+                <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-600 via-blue-600 to-cyan-500 shadow-lg shadow-indigo-600/25">
+                  <Activity size={16} className="text-white" />
+                </div>
+                <div>
+                  <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-indigo-500">Feedback CRM</p>
+                  <h1 className="text-sm font-bold tracking-tight text-slate-900">Retention Intelligence</h1>
+                </div>
               </div>
-              <button
-                onClick={toggleLlmConnection}
-                disabled={llmBusy}
-                className={`shrink-0 px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition-colors ${llmConnected ? 'bg-rose-50 text-rose-700 border border-rose-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'} disabled:opacity-50`}
-              >
-                {llmBusy ? 'Saving...' : llmConnected ? 'Pause Usage' : 'Enable Usage'}
-              </button>
+              <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-600">
+                {llmGatewayStatusLabel}
+              </span>
             </div>
-            {false && (
-              <div className="mt-3 rounded-lg border border-slate-200 bg-white px-2.5 py-2">
-                <p className="uppercase tracking-[0.12em] font-bold text-[10px] text-slate-400">Gateway Routes</p>
-                <div className="mt-2 space-y-1">
-                  {llmGatewayEndpoints.slice(0, 3).map((endpoint) => (
-                    <div key={endpoint.url} className="flex items-start justify-between gap-2 text-[10px]">
-                      <div className="min-w-0">
-                        <p className="font-semibold text-slate-700 truncate">
-                          {endpoint.label}
-                          {endpoint.active ? ' • Active' : ''}
-                        </p>
-                        <p className="text-slate-400 truncate" title={String(endpoint.url)}>{String(endpoint.url)}</p>
-                      </div>
-                      <span className={`shrink-0 rounded-full border px-2 py-0.5 font-semibold ${
-                        endpoint.status === 'connected'
-                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                          : endpoint.status === 'standby'
-                            ? 'bg-slate-50 text-slate-500 border-slate-200'
-                            : 'bg-rose-50 text-rose-700 border-rose-200'
-                      }`}>
-                        {endpoint.status === 'connected' ? 'Online' : endpoint.status === 'standby' ? 'Standby' : 'Offline'}
+            {typeof onBack === 'function' && (
+              <button
+                onClick={onBack}
+                className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-50 hover:text-slate-900"
+              >
+                <ArrowLeft size={14} />
+                Back to Home
+              </button>
+            )}
+          </div>
+
+          <div className="mt-4">
+            <p className="px-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">Workspace</p>
+            <div className="mt-2 flex gap-2 overflow-x-auto pb-1 lg:flex-col lg:overflow-visible lg:pb-0">
+              {navItems.map((item) => (
+                <button
+                  key={item.id}
+                  onClick={() => navigateToView(item.id)}
+                  className={`group min-w-[206px] rounded-2xl border px-3.5 py-3 text-left transition-all lg:min-w-0 ${
+                    activeView === item.id
+                      ? 'border-indigo-200 bg-indigo-50/90 shadow-[0_12px_30px_-20px_rgba(79,70,229,0.9)]'
+                      : 'border-slate-200/90 bg-white hover:border-slate-300 hover:bg-slate-50'
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex min-w-0 items-center gap-2.5">
+                      <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border ${activeView === item.id ? 'border-indigo-200 bg-indigo-100 text-indigo-700' : 'border-slate-200 bg-slate-100 text-slate-500'}`}>
+                        <item.icon size={16} />
                       </span>
+                      <div className="min-w-0">
+                        <p className={`truncate text-[13px] font-semibold ${activeView === item.id ? 'text-indigo-900' : 'text-slate-800'}`}>{item.label}</p>
+                        <p className={`mt-0.5 truncate text-[10px] font-semibold uppercase tracking-[0.12em] ${activeView === item.id ? 'text-indigo-600' : 'text-slate-500'}`}>{navItemBadges[item.id]}</p>
+                      </div>
                     </div>
-                  ))}
+                    <ChevronRight size={15} className={activeView === item.id ? 'text-indigo-500' : 'text-slate-300'} />
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="mt-4 space-y-3">
+            <div className="rounded-2xl border border-slate-200 bg-white px-3.5 py-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">LLM Control</p>
+                  <div className="mt-1 flex items-center gap-2">
+                    <span className={`inline-flex h-2 w-2 rounded-full ${llmConnected ? 'bg-emerald-500' : 'bg-slate-400'}`} />
+                    <p className="text-xs font-semibold text-slate-900">{llmGatewayStatusLabel}</p>
+                  </div>
+                  {llmGatewayWarning && (
+                    <p className="mt-1 text-[10px] text-amber-600 line-clamp-2" title={String(llmGatewayWarning)}>
+                      {String(llmGatewayWarning)}
+                    </p>
+                  )}
+                  {llmConnected && !llmEndpointActive && llmEndpointError && (
+                    <p className="mt-1 text-[10px] text-rose-500 line-clamp-2" title={String(llmEndpointError)}>
+                      {String(llmEndpointError)}
+                    </p>
+                  )}
+                </div>
+                <button
+                  onClick={toggleLlmConnection}
+                  disabled={llmBusy}
+                  className={`shrink-0 rounded-lg border px-2.5 py-1.5 text-[11px] font-bold transition-colors ${llmConnected ? 'border-rose-200 bg-rose-50 text-rose-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'} disabled:opacity-50`}
+                >
+                  {llmBusy ? 'Saving...' : llmConnected ? 'Pause' : 'Enable'}
+                </button>
+              </div>
+              <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-2">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">Token Used</p>
+                <p className="mt-1 text-sm font-bold text-slate-900">{Number(llmUsage?.usage?.total_tokens || 0).toLocaleString()}</p>
+              </div>
+            </div>
+
+            {(analysisTaskId || analysisProgress > 0) && (
+              <div className="rounded-2xl border border-indigo-200 bg-indigo-50 px-3.5 py-3">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-indigo-500">Analysis Progress</p>
+                <p className="mt-1 text-xs font-semibold text-indigo-900">
+                  {analysisProcessedReviews} / {analysisTotalReviews || 0} processed
+                </p>
+                <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-indigo-100">
+                  <div className="h-full rounded-full bg-indigo-500 transition-all" style={{ width: `${analysisProgressPct}%` }} />
                 </div>
               </div>
             )}
-            <div className="mt-3 rounded-lg border border-slate-200 bg-white px-2.5 py-2">
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">Token Used</p>
-                <p className="text-[13px] font-bold text-slate-900">{Number(llmUsage?.usage?.total_tokens || 0).toLocaleString()}</p>
-              </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => handleFetchIntoCRM({ showAlert: false })}
+                disabled={refreshing}
+                className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-60"
+              >
+                {refreshing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                Fetch
+              </button>
+              <button
+                onClick={handleRefresh}
+                disabled={refreshing}
+                className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-60"
+              >
+                {refreshing ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />}
+                Refresh
+              </button>
             </div>
           </div>
-          {(analysisTaskId || analysisProgress > 0) && (
-            <div className="rounded-xl border border-indigo-100 bg-indigo-50 px-3 py-3 mb-2">
-              <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-indigo-500">Analysis Progress</p>
-              <p className="mt-1 text-[12px] font-semibold text-indigo-900">
-                {analysisProcessedReviews} of {analysisTotalReviews || 0} processed
-              </p>
-              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-indigo-100">
-                <div
-                  className="h-full rounded-full bg-indigo-500 transition-all"
-                  style={{ width: `${Math.max(0, Math.min(100, Number(analysisProgress) || 0))}%` }}
-                />
+        </div>
+      </aside>
+
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        <div className="border-b border-slate-200 bg-white">
+          <div className="px-4 py-3 sm:px-6 lg:px-8">
+            <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+              <div className="min-w-0">
+                <h2 className="text-lg font-bold tracking-tight text-slate-900">{activeViewMeta.title}</h2>
+                <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] font-medium text-slate-500">
+                  <span>{connectors.length.toLocaleString()} sources</span>
+                  <span aria-hidden>&middot;</span>
+                  <span>{totalFeedbackCount.toLocaleString()} reviews in CRM</span>
+                  <span aria-hidden>&middot;</span>
+                  <span>{pendingFeedbackCount.toLocaleString()} pending analysis</span>
+                  <span aria-hidden>&middot;</span>
+                  <span>{issueCount.toLocaleString()} active issues</span>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <button
+                  onClick={() => handleFetchIntoCRM({ showAlert: false })}
+                  disabled={refreshing}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-60"
+                >
+                  {refreshing ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
+                  Fetch Reviews
+                </button>
+                <button
+                  onClick={() => runAnalyzeAllPending()}
+                  disabled={!llmConnected || Boolean(analysisTaskId)}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 py-1.5 text-[11px] font-semibold text-indigo-700 transition-colors hover:bg-indigo-100 disabled:opacity-60"
+                >
+                  {analysisTaskId ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
+                  {analysisTaskId ? 'Analyzing...' : 'Analyze Pending'}
+                </button>
+                {analysisResultSummary && (
+                  <button
+                    onClick={() => setAnalysisResultModalOpen(true)}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-sky-200 bg-sky-50 px-2.5 py-1.5 text-[11px] font-semibold text-sky-700 transition-colors hover:bg-sky-100"
+                  >
+                    <Eye size={13} />
+                    View Latest Results
+                  </button>
+                )}
+                <button
+                  onClick={openProductHealthDashboard}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-[11px] font-semibold text-emerald-700 transition-colors hover:bg-emerald-100"
+                >
+                  <BarChart3 size={13} />
+                  Product Health
+                </button>
               </div>
             </div>
+
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {workflowSteps.map((step, index) => (
+                <button
+                  key={step.id}
+                  onClick={step.onClick}
+                  disabled={step.disabled}
+                  className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold transition-colors disabled:opacity-60 ${
+                    step.status === 'complete'
+                      ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                      : 'border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100'
+                  }`}
+                >
+                  {step.status === 'complete' ? <Check size={11} /> : <ChevronRight size={11} />}
+                  {index + 1}. {step.title}
+                </button>
+              ))}
+            </div>
+
+            {analysisNotice && (
+              <div className={`mt-3 rounded-xl border px-3 py-2 text-xs font-medium ${analysisNoticeTone}`}>
+                {analysisNotice}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto custom-scrollbar">
+          {activeView === 'setup' && (
+            <SourceSetupView
+              connectors={connectors}
+              loading={loading}
+              selectedConnectorIds={selectedConnectorIds}
+              onToggleConnector={toggleConnectorSelection}
+              fetchScope={fetchScope}
+              onFetchScopeChange={setFetchScope}
+              fetchDays={fetchDays}
+              onFetchDaysChange={setFetchDays}
+              rangeStart={rangeStart}
+              onRangeStartChange={setRangeStart}
+              rangeEnd={rangeEnd}
+              onRangeEndChange={setRangeEnd}
+              savingSetup={savingSetup}
+              refreshing={refreshing}
+              setupMessage={setupMessage}
+              onSaveSetup={saveSetupPreferences}
+              connectorIntervals={connectorIntervals}
+              onConnectorIntervalChange={handleConnectorIntervalChange}
+              onSaveConnectorInterval={handleSaveConnectorInterval}
+              onSaveBulkConnectorIntervals={handleSaveBulkConnectorIntervals}
+              connectorAnalysisIntervals={connectorAnalysisIntervals}
+              onConnectorAnalysisIntervalChange={handleConnectorAnalysisIntervalChange}
+              onSaveConnectorAnalysisInterval={handleSaveConnectorAnalysisInterval}
+              onSaveBulkConnectorAnalysisIntervals={handleSaveBulkConnectorAnalysisIntervals}
+              onRemoveConnector={handleConnectorRemovedFromSetup}
+              onFetchNow={() => handleFetchIntoCRM({ showAlert: false })}
+              onConnectorCreated={handleConnectorCreatedFromSetup}
+              setupComplete={setupComplete}
+            />
           )}
-          <button onClick={() => handleFetchIntoCRM({ showAlert: false })} disabled={refreshing} className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-[12px] text-slate-500 hover:bg-slate-50 transition-all">
-            {refreshing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Fetch Into CRM
-          </button>
-          <button onClick={handleRefresh} disabled={refreshing} className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-[12px] text-slate-500 hover:bg-slate-50 transition-all">
-            {refreshing ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />} Recalculate Scores
-          </button>
+          {activeView === 'knowledge_base' && (
+            <KnowledgeBaseView
+              data={knowledgeOffers}
+              loading={knowledgeLoading}
+              message={knowledgeMessage}
+              onCreateOffer={createKnowledgeOffer}
+              onUpdateOffer={updateKnowledgeOffer}
+              onDeleteOffer={deleteKnowledgeOffer}
+              onRefresh={fetchKnowledgeOffers}
+              onMessage={setKnowledgeMessage}
+            />
+          )}
+          {activeView === 'dashboard' && <DashboardView dashboard={dashboard} onViewIssue={viewIssueDetail} onNav={navigateToView} />}
+          {activeView === 'feedback' && (
+            <FeedbackInboxView
+              data={feedback} loading={loading} search={searchQuery} onSearch={setSearchQuery}
+              filterStatus={filterStatus} onFilterStatus={setFilterStatus}
+              filterSentiment={filterSentiment} onFilterSentiment={setFilterSentiment}
+              filterPriority={filterPriority} onFilterPriority={setFilterPriority}
+              filterSource={filterSource} onFilterSource={setFilterSource}
+              filterStartDate={filterStartDate} onFilterStartDate={setFilterStartDate}
+              filterEndDate={filterEndDate} onFilterEndDate={setFilterEndDate}
+              analysisLimit={analysisLimit} onAnalysisLimit={setAnalysisLimit}
+              analysisStartIndex={analysisStartIndex} onAnalysisStartIndex={setAnalysisStartIndex}
+              analysisEndIndex={analysisEndIndex} onAnalysisEndIndex={setAnalysisEndIndex}
+              analysisSelectedStars={analysisSelectedStars} onAnalysisSelectedStars={setAnalysisSelectedStars}
+              feedbackLimit={feedbackLimit}
+              feedbackOffset={feedbackOffset}
+              onChangePageSize={(nextLimit) => {
+                setFeedbackLimit(nextLimit);
+                fetchFeedback({ limit: nextLimit, offset: 0 });
+              }}
+              onUpdateStatus={updateFeedbackStatus} onUpdatePriority={updateFeedbackPriority}
+              onGenerateResponse={generateAIResponse} onRefresh={fetchFeedback}
+              onGenerateOutreach={generateAgenticOutreach}
+              onClearFilters={clearFeedbackFilters}
+              onShowCreate={() => setShowCreateFeedback(true)}
+              onRunAnalysis={triggerInboxAnalysis}
+              llmConnected={llmConnected}
+              analysisTriggering={Boolean(analysisTaskId)}
+              analysisTriggerMessage={analysisNotice}
+              analysisProgress={analysisProgress}
+              analysisStatus={analysisStatus}
+              outreachGeneratingId={outreachGeneratingId}
+            />
+          )}
+          {activeView === 'customers' && <CustomersView data={customers} loading={loading} search={searchQuery} onSearch={setSearchQuery} onViewTimeline={viewCustomerTimeline} />}
         </div>
       </div>
-
-      {/* Main Content */}
-      <div className="flex-1 overflow-y-auto custom-scrollbar">
-        {activeView === 'setup' && (
-          <SourceSetupView
-            connectors={connectors}
-            loading={loading}
-            selectedConnectorIds={selectedConnectorIds}
-            onToggleConnector={toggleConnectorSelection}
-            fetchScope={fetchScope}
-            onFetchScopeChange={setFetchScope}
-            fetchDays={fetchDays}
-            onFetchDaysChange={setFetchDays}
-            rangeStart={rangeStart}
-            onRangeStartChange={setRangeStart}
-            rangeEnd={rangeEnd}
-            onRangeEndChange={setRangeEnd}
-            savingSetup={savingSetup}
-            refreshing={refreshing}
-            setupMessage={setupMessage}
-            onSaveSetup={saveSetupPreferences}
-            connectorIntervals={connectorIntervals}
-            onConnectorIntervalChange={handleConnectorIntervalChange}
-            onSaveConnectorInterval={handleSaveConnectorInterval}
-            onSaveBulkConnectorIntervals={handleSaveBulkConnectorIntervals}
-            connectorAnalysisIntervals={connectorAnalysisIntervals}
-            onConnectorAnalysisIntervalChange={handleConnectorAnalysisIntervalChange}
-            onSaveConnectorAnalysisInterval={handleSaveConnectorAnalysisInterval}
-            onSaveBulkConnectorAnalysisIntervals={handleSaveBulkConnectorAnalysisIntervals}
-            onRemoveConnector={handleConnectorRemovedFromSetup}
-            onFetchNow={() => handleFetchIntoCRM({ showAlert: false })}
-            onConnectorCreated={handleConnectorCreatedFromSetup}
-          />
-        )}
-        {activeView === 'knowledge_base' && (
-          <KnowledgeBaseView
-            data={knowledgeOffers}
-            loading={knowledgeLoading}
-            message={knowledgeMessage}
-            onCreateOffer={createKnowledgeOffer}
-            onUpdateOffer={updateKnowledgeOffer}
-            onDeleteOffer={deleteKnowledgeOffer}
-            onRefresh={fetchKnowledgeOffers}
-            onMessage={setKnowledgeMessage}
-          />
-        )}
-        {activeView === 'dashboard' && <DashboardView dashboard={dashboard} onViewIssue={viewIssueDetail} onNav={setActiveView} />}
-        {activeView === 'feedback' && (
-          <FeedbackInboxView
-            data={feedback} loading={loading} search={searchQuery} onSearch={setSearchQuery}
-            filterStatus={filterStatus} onFilterStatus={setFilterStatus}
-            filterSentiment={filterSentiment} onFilterSentiment={setFilterSentiment}
-            filterPriority={filterPriority} onFilterPriority={setFilterPriority}
-            filterRating={filterRating} onFilterRating={setFilterRating}
-            filterSource={filterSource} onFilterSource={setFilterSource}
-            filterStartDate={filterStartDate} onFilterStartDate={setFilterStartDate}
-            filterEndDate={filterEndDate} onFilterEndDate={setFilterEndDate}
-            analysisLimit={analysisLimit} onAnalysisLimit={setAnalysisLimit}
-            analysisStartIndex={analysisStartIndex} onAnalysisStartIndex={setAnalysisStartIndex}
-            analysisEndIndex={analysisEndIndex} onAnalysisEndIndex={setAnalysisEndIndex}
-            analysisSelectedStars={analysisSelectedStars} onAnalysisSelectedStars={setAnalysisSelectedStars}
-            feedbackLimit={feedbackLimit}
-            feedbackOffset={feedbackOffset}
-            onChangePageSize={(nextLimit) => {
-              setFeedbackLimit(nextLimit);
-              fetchFeedback({ limit: nextLimit, offset: 0 });
-            }}
-            onUpdateStatus={updateFeedbackStatus} onUpdatePriority={updateFeedbackPriority}
-            onGenerateResponse={generateAIResponse} onRefresh={fetchFeedback}
-            onGenerateOutreach={generateAgenticOutreach}
-            onClearFilters={clearFeedbackFilters}
-            onShowCreate={() => setShowCreateFeedback(true)}
-            onRunAnalysis={triggerInboxAnalysis}
-            llmConnected={llmConnected}
-            analysisTriggering={Boolean(analysisTaskId)}
-            analysisTriggerMessage={analysisNotice}
-            analysisProgress={analysisProgress}
-            analysisStatus={analysisStatus}
-            outreachGeneratingId={outreachGeneratingId}
-          />
-        )}
-        {activeView === 'issues' && <IssuesView data={issues} loading={loading} onViewDetail={viewIssueDetail} onShowCreate={() => setShowCreateIssue(true)} />}
-        {activeView === 'customers' && <CustomersView data={customers} loading={loading} search={searchQuery} onSearch={setSearchQuery} onViewTimeline={viewCustomerTimeline} />}
-      </div>
-
       {/* AI Response Modal */}
       <AnimatePresence>
+        {postFetchAnalysisPrompt.open && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[94] flex items-center justify-center bg-slate-900/35 p-4">
+            <motion.div initial={{ scale: 0.97, opacity: 0, y: 10 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.97, opacity: 0, y: 10 }} className="w-full max-w-xl rounded-[24px] border border-slate-200 bg-white shadow-[0_30px_120px_-50px_rgba(15,23,42,0.55)]">
+              <div className="border-b border-slate-200 px-6 py-5">
+                <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-indigo-500">Next Step</p>
+                <h3 className="mt-1 text-2xl font-black tracking-tight text-slate-950">How should we run analysis?</h3>
+                <p className="mt-2 text-sm text-slate-600">
+                  Imported {postFetchAnalysisPrompt.imported.toLocaleString()} review(s) from {postFetchAnalysisPrompt.connectorCount.toLocaleString()} connector(s).
+                  {postFetchAnalysisPrompt.skipped > 0 ? ` ${postFetchAnalysisPrompt.skipped.toLocaleString()} row(s) were skipped.` : ''}
+                </p>
+                <p className="mt-2 text-sm font-semibold text-slate-700">
+                  {postFetchAnalysisPrompt.pendingCount.toLocaleString()} review(s) are currently waiting for analysis.
+                </p>
+              </div>
+              <div className="space-y-3 px-6 py-5">
+                <button
+                  onClick={runAnalyzeAllFromPrompt}
+                  disabled={Boolean(analysisTaskId)}
+                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {analysisTaskId ? <Loader2 size={16} className="animate-spin" /> : <Zap size={16} />}
+                  Analyze All Pending Reviews
+                </button>
+                <button
+                  onClick={useFiltersFromPrompt}
+                  className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50"
+                >
+                  Use Filters To Select Reviews
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
         {analysisOverlayOpen && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[95] flex items-center justify-center bg-slate-900/35 p-4">
             <motion.div initial={{ scale: 0.97, opacity: 0, y: 12 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.97, opacity: 0, y: 12 }} className="w-full max-w-2xl rounded-[28px] border border-slate-200 bg-white shadow-[0_30px_120px_-50px_rgba(15,23,42,0.45)]">
@@ -2057,7 +2729,7 @@ const FeedbackCRM = ({ user, onBack = null }) => {
           </motion.div>
         )}
         {analysisResultModalOpen && analysisResultSummary && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[96] flex items-center justify-center bg-slate-900/45 p-4">
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[96] bg-slate-950/55 p-3 sm:p-6">
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -2065,140 +2737,212 @@ const FeedbackCRM = ({ user, onBack = null }) => {
               onClick={() => setAnalysisResultModalOpen(false)}
               className="absolute inset-0"
             />
-            <motion.div initial={{ scale: 0.97, opacity: 0, y: 10 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.97, opacity: 0, y: 10 }} className="relative z-10 w-full max-w-5xl rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_45px_140px_-60px_rgba(15,23,42,0.75)]">
-              <button
-                onClick={() => setAnalysisResultModalOpen(false)}
-                className="absolute right-4 top-4 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-700"
-              >
-                <X size={16} />
-              </button>
-              <div>
-                <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">Analysis Complete</p>
-                <h3 className="mt-1 text-2xl font-black text-slate-950">General Results and User Segments</h3>
-                <p className="mt-1 text-sm text-slate-600">
-                  {analysisTotalReviewsValue.toLocaleString()} analyzed reviews with grouped problem segments.
-                </p>
-                {(analysisResultFilters?.startDate || analysisResultFilters?.endDate || analysisResultFilters?.rating || analysisResultFilters?.source || (analysisResultFilters?.ratingValues && analysisResultFilters.ratingValues.length > 0)) && (
+            <motion.div initial={{ y: 12, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 12, opacity: 0 }} className="relative z-10 mx-auto flex h-full w-full max-w-6xl flex-col overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-[0_45px_150px_-60px_rgba(15,23,42,0.85)]">
+              <div className="border-b border-slate-200 bg-gradient-to-r from-sky-50 via-white to-indigo-50 px-5 py-5 sm:px-6">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-sky-600">Analysis Report</p>
+                    <h3 className="mt-1 text-2xl font-black tracking-tight text-slate-950">Retention Intelligence Summary</h3>
+                    <p className="mt-1 text-sm text-slate-600">
+                      {analysisTotalReviewsValue.toLocaleString()} reviews analyzed for churn and issue trends.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setAnalysisResultModalOpen(false)}
+                    className="rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-700"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+                {(analysisResultFilters?.startDate || analysisResultFilters?.endDate || analysisResultFilters?.source || (analysisResultFilters?.ratingValues && analysisResultFilters.ratingValues.length > 0)) && (
                   <div className="mt-3 flex flex-wrap gap-2">
                     {analysisResultFilters?.source && (
-                      <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.11em] text-slate-600">
-                        Source: {analysisResultFilters.source}
+                      <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.11em] text-slate-600">
+                        Source: {analysisResultFilters.source}{analysisResultFilters?.sourceType ? ` (${analysisResultFilters.sourceType})` : ''}
                       </span>
                     )}
                     {analysisResultFilters?.startDate && (
-                      <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.11em] text-slate-600">
+                      <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.11em] text-slate-600">
                         From: {analysisResultFilters.startDate}
                       </span>
                     )}
                     {analysisResultFilters?.endDate && (
-                      <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.11em] text-slate-600">
+                      <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.11em] text-slate-600">
                         To: {analysisResultFilters.endDate}
                       </span>
                     )}
-                    {analysisResultFilters?.rating && (
-                      <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.11em] text-slate-600">
-                        Rating: {analysisResultFilters.rating} star
-                      </span>
-                    )}
                     {Array.isArray(analysisResultFilters?.ratingValues) && analysisResultFilters.ratingValues.length > 0 && (
-                      <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.11em] text-slate-600">
-                        Stars: {[...analysisResultFilters.ratingValues].sort((a, b) => a - b).map((value) => `${value}★`).join(', ')}
+                      <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.11em] text-slate-600">
+                        Stars: {[...analysisResultFilters.ratingValues].sort((a, b) => a - b).map((value) => `${value} star`).join(', ')}
                       </span>
                     )}
                   </div>
                 )}
               </div>
 
-              <div className="mt-5 grid gap-3 sm:grid-cols-4">
-                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                  <p className="text-[11px] font-bold uppercase tracking-[0.13em] text-slate-500">Avg Sentiment</p>
-                  <p className="mt-1 text-2xl font-black text-slate-900">{Number(analysisSummary?.avg_sentiment || 0).toFixed(2)}</p>
+              <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 sm:px-6 custom-scrollbar">
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-7">
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                    <p className="text-[11px] font-bold uppercase tracking-[0.13em] text-slate-500">Avg Sentiment</p>
+                    <p className="mt-1 text-2xl font-black text-slate-900">{Number(analysisSummary?.avg_sentiment || 0).toFixed(2)}</p>
+                  </div>
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                    <p className="text-[11px] font-bold uppercase tracking-[0.13em] text-slate-500">Avg Churn</p>
+                    <p className="mt-1 text-2xl font-black text-slate-900">{Number(analysisSummary?.avg_churn || 0).toFixed(2)}</p>
+                  </div>
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                    <p className="text-[11px] font-bold uppercase tracking-[0.13em] text-slate-500">High Churn</p>
+                    <p className="mt-1 text-2xl font-black text-rose-600">{Number(analysisSummary?.high_churn || 0)}</p>
+                  </div>
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                    <p className="text-[11px] font-bold uppercase tracking-[0.13em] text-slate-500">Trend</p>
+                    <p className={`mt-2 text-sm font-bold capitalize ${analysisSummary?.sentiment_trend === 'improving' ? 'text-emerald-600' : analysisSummary?.sentiment_trend === 'degrading' ? 'text-rose-600' : 'text-slate-700'}`}>
+                      {analysisSummary?.sentiment_trend || 'stable'}
+                    </p>
+                  </div>
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                    <p className="text-[11px] font-bold uppercase tracking-[0.13em] text-slate-500">Coverage</p>
+                    <p className="mt-1 text-2xl font-black text-slate-900">{analysisCoveragePct}%</p>
+                  </div>
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                    <p className="text-[11px] font-bold uppercase tracking-[0.13em] text-slate-500">Action Confidence</p>
+                    <p className="mt-1 text-2xl font-black text-indigo-700">{Math.round(avgActionConfidence * 100)}%</p>
+                  </div>
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                    <p className="text-[11px] font-bold uppercase tracking-[0.13em] text-slate-500">Business Impact</p>
+                    <p className="mt-1 text-2xl font-black text-amber-700">{avgBusinessImpact.toFixed(1)}</p>
+                  </div>
                 </div>
-                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                  <p className="text-[11px] font-bold uppercase tracking-[0.13em] text-slate-500">Avg Churn</p>
-                  <p className="mt-1 text-2xl font-black text-slate-900">{Number(analysisSummary?.avg_churn || 0).toFixed(2)}</p>
-                </div>
-                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                  <p className="text-[11px] font-bold uppercase tracking-[0.13em] text-slate-500">High Churn</p>
-                  <p className="mt-1 text-2xl font-black text-rose-600">{Number(analysisSummary?.high_churn || 0)}</p>
-                </div>
-                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                  <p className="text-[11px] font-bold uppercase tracking-[0.13em] text-slate-500">Trend</p>
-                  <p className={`mt-1 text-sm font-bold capitalize ${analysisSummary?.sentiment_trend === 'improving' ? 'text-emerald-600' : analysisSummary?.sentiment_trend === 'degrading' ? 'text-rose-600' : 'text-slate-700'}`}>
-                    {analysisSummary?.sentiment_trend || 'stable'}
-                  </p>
-                </div>
-              </div>
 
-              <div className="mt-4 rounded-2xl border border-slate-200 bg-gradient-to-r from-slate-50 to-slate-100 p-4">
-                <p className="text-[11px] font-bold uppercase tracking-[0.15em] text-slate-500">Sentiment Mix</p>
-                <div className="mt-2 grid gap-2 sm:grid-cols-3">
-                  <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2">
-                    <p className="text-[11px] font-semibold text-emerald-700">Positive</p>
-                    <p className="text-lg font-black text-emerald-800">{positivePct}%</p>
-                  </div>
-                  <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
-                    <p className="text-[11px] font-semibold text-slate-700">Neutral</p>
-                    <p className="text-lg font-black text-slate-800">{neutralPct}%</p>
-                  </div>
-                  <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2">
-                    <p className="text-[11px] font-semibold text-rose-700">Negative</p>
-                    <p className="text-lg font-black text-rose-800">{negativePct}%</p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="mt-4 grid gap-4 lg:grid-cols-2">
-                <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                  <p className="text-[11px] font-bold uppercase tracking-[0.15em] text-slate-500">Main Problem To Fix</p>
-                  <h4 className="mt-1 text-lg font-black text-slate-900">{analysisSummary?.main_problem_to_fix?.pain_point || 'none'}</h4>
-                  <p className="mt-2 text-sm text-slate-600">{analysisSummary?.main_problem_to_fix?.why_now || 'No dominant pain point detected.'}</p>
-                  <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-                    <div className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2">
-                      <p className="text-slate-500">Affected Reviews</p>
-                      <p className="font-bold text-slate-900">{Number(analysisSummary?.main_problem_to_fix?.affected_reviews || 0)}</p>
-                    </div>
-                    <div className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2">
-                      <p className="text-slate-500">Impact Score</p>
-                      <p className="font-bold text-slate-900">{Number(analysisSummary?.main_problem_to_fix?.impact_score || 0).toFixed(2)}</p>
+                <div className="mt-4 grid gap-4 xl:grid-cols-2">
+                  <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                    <p className="text-[11px] font-bold uppercase tracking-[0.15em] text-slate-500">Main Problem To Fix</p>
+                    <h4 className="mt-1 text-lg font-black text-slate-900">{resolvedMainProblemLabel}</h4>
+                    <p className="mt-2 text-sm text-slate-600">{resolvedMainProblemWhyNow}</p>
+                    <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                      <div className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2">
+                        <p className="text-slate-500">Affected Reviews</p>
+                        <p className="font-bold text-slate-900">{resolvedMainProblemAffectedReviews}</p>
+                      </div>
+                      <div className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2">
+                        <p className="text-slate-500">Impact Score</p>
+                        <p className="font-bold text-slate-900">{resolvedMainProblemImpactScore.toFixed(2)}</p>
+                      </div>
                     </div>
                   </div>
-                </div>
-                <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                  <p className="text-[11px] font-bold uppercase tracking-[0.15em] text-slate-500">User Segments (Same Problem Groups)</p>
-                  <div className="mt-2 space-y-2">
-                    {(analysisSummary?.user_segments || []).slice(0, 6).map((segment) => (
-                      <div key={`${segment.segment}-${segment.count}`} className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
-                        <span className="font-medium text-slate-700">{segment.segment}</span>
-                        <span className="font-semibold text-indigo-700">{segment.count}</span>
-                      </div>
-                    ))}
-                    {(!analysisSummary?.user_segments || analysisSummary.user_segments.length === 0) && (
-                      <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-4 text-sm text-slate-500">No segment clusters yet.</div>
-                    )}
-                  </div>
-                </div>
-              </div>
 
-              <div className="mt-4 grid gap-4 lg:grid-cols-2">
-                <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                  <p className="text-[11px] font-bold uppercase tracking-[0.15em] text-slate-500">Top Pain Points</p>
-                  <div className="mt-2 space-y-2">
-                    {(analysisSummary?.top_pain_points || []).slice(0, 5).map((pain) => (
-                      <div key={`${pain.pain_point}-${pain.count}`} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-                        <p className="text-sm font-semibold text-slate-800">{pain.pain_point}</p>
-                        <p className="text-xs text-slate-500">{pain.count} reviews | impact {Number(pain.impact_score || 0).toFixed(2)}</p>
-                      </div>
-                    ))}
-                    {(!analysisSummary?.top_pain_points || analysisSummary.top_pain_points.length === 0) && (
-                      <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-4 text-sm text-slate-500">No pain points found yet.</div>
-                    )}
+                  <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                    <p className="text-[11px] font-bold uppercase tracking-[0.15em] text-slate-500">Sentiment Mix</p>
+                    <div className="mt-3 space-y-3">
+                      {[{ label: 'Positive', pct: positivePct, bar: 'bg-emerald-500', text: 'text-emerald-700' }, { label: 'Neutral', pct: neutralPct, bar: 'bg-slate-500', text: 'text-slate-700' }, { label: 'Negative', pct: negativePct, bar: 'bg-rose-500', text: 'text-rose-700' }].map((item) => (
+                        <div key={item.label}>
+                          <div className="mb-1 flex items-center justify-between text-xs font-semibold">
+                            <span className={item.text}>{item.label}</span>
+                            <span className="text-slate-600">{item.pct}%</span>
+                          </div>
+                          <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+                            <div className={`h-full ${item.bar}`} style={{ width: `${Math.max(0, Math.min(100, item.pct))}%` }} />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 </div>
-                <div className="rounded-2xl border border-slate-200 bg-white p-4">
+
+                <div className="mt-4 grid gap-4 xl:grid-cols-3">
+                  <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                    <p className="text-[11px] font-bold uppercase tracking-[0.15em] text-slate-500">User Segments</p>
+                    <div className="mt-2 space-y-2">
+                      {(analysisSummary?.user_segments || []).slice(0, 8).map((segment) => (
+                        <div key={`${segment.segment}-${segment.count}`} className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
+                          <span className="font-medium text-slate-700">{segment.segment}</span>
+                          <span className="font-semibold text-indigo-700">{segment.count}</span>
+                        </div>
+                      ))}
+                      {(!analysisSummary?.user_segments || analysisSummary.user_segments.length === 0) && (
+                        <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-4 text-sm text-slate-500">No segment clusters yet.</div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                    <p className="text-[11px] font-bold uppercase tracking-[0.15em] text-slate-500">Top Churn Drivers</p>
+                    <div className="mt-2 space-y-2">
+                      {churnDriverCards.map((driver) => (
+                        <div key={`${driver.label}-${driver.count}`} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                          <p className="text-sm font-semibold text-slate-800">{driver.label}</p>
+                          <p className="text-xs text-slate-500">{driver.count} reviews | impact {Number(driver.impact || 0).toFixed(2)}</p>
+                        </div>
+                      ))}
+                      {churnDriverCards.length === 0 && (
+                        <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-4 text-sm text-slate-500">No churn drivers found yet.</div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                    <p className="text-[11px] font-bold uppercase tracking-[0.15em] text-slate-500">Recurring Patterns</p>
+                    <div className="mt-2 space-y-2">
+                      {recurringIssuePatterns.map((pattern) => {
+                        const label = pattern.pattern || pattern.pattern_label || 'Pattern';
+                        const mentions = Number(pattern.mention_count || 0);
+                        const trend = String(pattern.trend_direction || 'stable');
+                        const recurrenceScore = Number(pattern.recurrence_score || 0);
+                        const trendScore = Number(pattern.trend_score || 0);
+                        return (
+                          <div key={`${label}-${mentions}-${trend}`} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                            <p className="text-sm font-semibold text-slate-800">{label}</p>
+                            <p className="text-xs text-slate-500">
+                              {mentions} mentions | trend {trend} | recurrence {recurrenceScore.toFixed(1)} | trend score {trendScore.toFixed(1)}
+                            </p>
+                          </div>
+                        );
+                      })}
+                      {recurringIssuePatterns.length === 0 && (
+                        <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-4 text-sm text-slate-500">
+                          No recurring issue patterns detected yet.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-4 grid gap-4 xl:grid-cols-2">
+                  <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                    <p className="text-[11px] font-bold uppercase tracking-[0.15em] text-slate-500">Top Pain Point Categories</p>
+                    <div className="mt-2 space-y-2">
+                      {topPainPoints.slice(0, 6).map((pain) => (
+                        <div key={`${pain.pain_point}-${pain.count}`} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                          <p className="text-sm font-semibold text-slate-800">{pain.pain_point}</p>
+                          <p className="text-xs text-slate-500">{pain.count} reviews | impact {Number(pain.impact_score || 0).toFixed(2)}</p>
+                        </div>
+                      ))}
+                      {topPainPoints.length === 0 && (
+                        <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-4 text-sm text-slate-500">No pain-point categories found yet.</div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                    <p className="text-[11px] font-bold uppercase tracking-[0.15em] text-slate-500">Churn Clusters</p>
+                    <div className="mt-2 space-y-2">
+                      {topChurnClusters.slice(0, 6).map((cluster) => (
+                        <div key={`${cluster.cluster}-${cluster.count}`} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                          <p className="text-sm font-semibold text-slate-800">{cluster.cluster}</p>
+                          <p className="text-xs text-slate-500">{cluster.count} reviews | impact {Number(cluster.impact_score || 0).toFixed(2)}</p>
+                        </div>
+                      ))}
+                      {topChurnClusters.length === 0 && (
+                        <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-4 text-sm text-slate-500">No churn clusters detected yet.</div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4">
                   <p className="text-[11px] font-bold uppercase tracking-[0.15em] text-slate-500">Growth Opportunities</p>
-                  <div className="mt-2 space-y-2">
-                    {(analysisSummary?.growth_opportunities || []).slice(0, 5).map((item) => (
+                  <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                    {(analysisSummary?.growth_opportunities || []).slice(0, 8).map((item) => (
                       <div key={`${item.suggestion}-${item.count}`} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
                         <p className="text-sm font-medium text-slate-800">{item.suggestion}</p>
                         <p className="text-xs text-slate-500">{item.count} mentions</p>
@@ -2211,31 +2955,42 @@ const FeedbackCRM = ({ user, onBack = null }) => {
                 </div>
               </div>
 
-              <div className="mt-5 flex flex-wrap items-center justify-end gap-2">
-                <button
-                  onClick={() => {
-                    setAnalysisResultModalOpen(false);
-                    setActiveView('knowledge_base');
-                  }}
-                  className="rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-2 text-sm font-semibold text-indigo-700 transition-colors hover:bg-indigo-100"
-                >
-                  Open Offer KB
-                </button>
-                <button
-                  onClick={() => {
-                    setAnalysisResultModalOpen(false);
-                    setActiveView('customers');
-                  }}
-                  className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-indigo-700"
-                >
-                  View Customer Profiles
-                </button>
-                <button
-                  onClick={() => setAnalysisResultModalOpen(false)}
-                  className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50"
-                >
-                  Close
-                </button>
+              <div className="border-t border-slate-200 bg-slate-50 px-5 py-3 sm:px-6">
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                  <button
+                    onClick={() => {
+                      setAnalysisResultModalOpen(false);
+                      setActiveView('knowledge_base');
+                    }}
+                    className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-700 transition-colors hover:bg-indigo-100"
+                  >
+                    Open Offer KB
+                  </button>
+                  <button
+                    onClick={() => {
+                      setAnalysisResultModalOpen(false);
+                      setActiveView('customers');
+                    }}
+                    className="rounded-lg border border-cyan-200 bg-cyan-50 px-3 py-2 text-xs font-semibold text-cyan-700 transition-colors hover:bg-cyan-100"
+                  >
+                    View Customers
+                  </button>
+                  <button
+                    onClick={() => {
+                      setAnalysisResultModalOpen(false);
+                      openProductHealthDashboard();
+                    }}
+                    className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700 transition-colors hover:bg-emerald-100"
+                  >
+                    Go To Dashboard
+                  </button>
+                  <button
+                    onClick={() => setAnalysisResultModalOpen(false)}
+                    className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50"
+                  >
+                    Close
+                  </button>
+                </div>
               </div>
             </motion.div>
           </motion.div>
@@ -2599,6 +3354,7 @@ const SourceSetupView = ({
   onRemoveConnector,
   onFetchNow,
   onConnectorCreated,
+  setupComplete,
 }) => {
   const [showAddDropdown, setShowAddDropdown] = useState(false);
   const [newConnectorType, setNewConnectorType] = useState('playstore');
@@ -2671,6 +3427,7 @@ const SourceSetupView = ({
   ];
   const activeFetchModeOption = fetchModeOptions.find(opt => opt.id === fetchScope) || fetchModeOptions[0];
   const activeAnalysisWindowOption = analysisWindowOptions.find(opt => opt.id === analysisWindow) || analysisWindowOptions[0];
+  const onboardingMode = !setupComplete;
   const selectedConnectors = useMemo(
     () => selectedConnectorIds
       .map(id => connectors.find(c => c.id === id))
@@ -2935,7 +3692,7 @@ const SourceSetupView = ({
       const selectedFetchInterval = connectorType === 'csv'
         ? 'manual'
         : (newConnectorFetchInterval || 'manual');
-      const selectedAnalysisInterval = 'manual';
+      const selectedAnalysisInterval = selectedFetchInterval === 'on_new' ? 'on_new' : 'manual';
       const defaultConnectorName = newConnectorName.trim() || `${selectedOption?.label || newConnectorType} (${identifier})`;
 
       const res = await apiFetch(`${API_BASE}/api/fi/connectors`, {
@@ -3211,8 +3968,14 @@ const SourceSetupView = ({
     <div className="w-full max-w-[1680px] mx-auto space-y-5 px-5 py-6 xl:px-8 2xl:px-10">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div>
-          <h1 className="text-xl font-bold text-slate-900">Feedback CRM Source Setup</h1>
-          <p className="text-sm text-slate-500">Select connectors and use their saved connector settings to fetch CRM feedback.</p>
+          <h1 className="text-xl font-bold text-slate-900">
+            {onboardingMode ? 'Feedback CRM One-Time Source Setup' : 'Feedback CRM Settings'}
+          </h1>
+          <p className="text-sm text-slate-500">
+            {onboardingMode
+              ? 'Complete this once during signup. After setup, source controls stay available in Settings.'
+              : 'Manage connectors, fetch windows, and source controls without leaving the CRM workspace.'}
+          </p>
         </div>
         <div className="flex items-center gap-2">
           <div className="relative">
@@ -3236,7 +3999,7 @@ const SourceSetupView = ({
         <div className="flex items-center justify-between gap-3">
           <div>
             <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">Connector Directory</p>
-            <h3 className="text-sm font-semibold text-slate-900 mt-1">All workspace and CRM sources stay visible here. Select one to open setup.</h3>
+            <h3 className="text-sm font-semibold text-slate-900 mt-1">All workspace and CRM sources stay visible here. Select one to open settings.</h3>
           </div>
           <span className="px-2.5 py-1 rounded-full bg-slate-50 border border-slate-200 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">
             {SOURCE_CONNECTOR_OPTIONS.length} visible
@@ -3325,6 +4088,7 @@ const SourceSetupView = ({
               <option value="hourly">Hourly</option>
               <option value="daily">Daily</option>
               <option value="weekly">Weekly</option>
+              <option value="on_new">On New Reviews</option>
             </select>
           </div>
         </div>
@@ -3528,8 +4292,12 @@ const SourceSetupView = ({
                       <p className="text-[11px] text-slate-400 mt-1 capitalize">
                         Scope: {connectorScope === 'feedback_crm' ? 'Feedback CRM' : 'Workspace'}
                       </p>
-                      <p className="text-[11px] text-slate-400 mt-1 capitalize">Interval: {connector.fetch_interval || 'manual'}</p>
-                      <p className="text-[11px] text-slate-400 mt-1 capitalize">Analysis: {connector.analysis_interval || 'manual'}</p>
+                      <p className="text-[11px] text-slate-400 mt-1 capitalize">
+                        Interval: {String(connector.fetch_interval || 'manual').replace('on_new', 'on new')}
+                      </p>
+                      <p className="text-[11px] text-slate-400 mt-1 capitalize">
+                        Analysis: {String(connector.analysis_interval || 'manual').replace('on_new', 'on new')}
+                      </p>
                     </button>
                     <div className="flex items-center gap-2">
                       <span className={`w-5 h-5 rounded border flex items-center justify-center ${selected ? 'bg-indigo-600 border-indigo-600 text-white' : 'border-slate-300 text-transparent'}`}>
@@ -3582,7 +4350,7 @@ const SourceSetupView = ({
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
             <h3 className="text-sm font-semibold text-slate-900">Auto Intervals (after initial fetch)</h3>
-            <p className="text-xs text-slate-500 mt-1">Configure fetch cadence and churn-analysis cadence separately.</p>
+            <p className="text-xs text-slate-500 mt-1">Configure fetch cadence and churn-analysis cadence separately. "On New Reviews" polls every ~5 minutes.</p>
           </div>
           {!!selectedConnectors.length && (
             <span className="px-2 py-0.5 rounded-full border border-slate-200 bg-slate-50 text-[10px] font-semibold text-slate-600">
@@ -3608,6 +4376,7 @@ const SourceSetupView = ({
                   <option value="hourly">Hourly</option>
                   <option value="daily">Daily</option>
                   <option value="weekly">Weekly</option>
+                  <option value="on_new">On New Reviews</option>
                 </select>
                 <div className="flex items-center gap-2">
                   <button
@@ -3642,6 +4411,7 @@ const SourceSetupView = ({
                   <option value="hourly">Hourly</option>
                   <option value="daily">Daily</option>
                   <option value="weekly">Weekly</option>
+                  <option value="on_new">On New Reviews</option>
                 </select>
                 <div className="flex items-center gap-2">
                   <button
@@ -3676,6 +4446,7 @@ const SourceSetupView = ({
                       <option value="hourly">Hourly</option>
                       <option value="daily">Daily</option>
                       <option value="weekly">Weekly</option>
+                      <option value="on_new">On New Reviews</option>
                     </select>
                     <button
                       type="button"
@@ -3694,6 +4465,7 @@ const SourceSetupView = ({
                       <option value="hourly">Hourly</option>
                       <option value="daily">Daily</option>
                       <option value="weekly">Weekly</option>
+                      <option value="on_new">On New Reviews</option>
                     </select>
                     <button
                       type="button"
@@ -3716,10 +4488,10 @@ const SourceSetupView = ({
         <p className="text-xs text-slate-500">{setupMessage || `${selectedConnectorIds.length} connector(s) selected.`}</p>
         <div className="flex items-center gap-3">
           <button onClick={onSaveSetup} disabled={savingSetup} className="px-3.5 py-1.5 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 hover:border-slate-300 hover:text-slate-900 disabled:opacity-50 transition-colors flex items-center gap-1.5">
-            {savingSetup && <Loader2 size={14} className="animate-spin" />} Save Selection
+            {savingSetup && <Loader2 size={14} className="animate-spin" />} {onboardingMode ? 'Save Setup' : 'Save Settings'}
           </button>
           <button onClick={handleFetchNowFromSetup} disabled={refreshing || Object.values(csvUploadingByConnector).some(Boolean) || connectors.length === 0 || selectedConnectorIds.length === 0} className="px-4 py-1.5 bg-slate-900 text-white rounded-lg text-xs font-semibold hover:bg-slate-800 disabled:opacity-50 transition-colors flex items-center gap-1.5">
-            {refreshing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Fetch Reviews Into CRM
+            {refreshing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} {onboardingMode ? 'Finish Setup & Open Inbox' : 'Fetch Reviews Into CRM'}
           </button>
         </div>
       </div>
@@ -3730,77 +4502,386 @@ const SourceSetupView = ({
 const DashboardView = ({ dashboard, onViewIssue, onNav }) => {
   if (!dashboard) return <div className="flex items-center justify-center h-full"><Loader2 size={24} className="animate-spin text-indigo-500" /></div>;
   const d = dashboard;
+  const pendingAnalysis = Math.max(0, Number(d?.pending_feedback ?? (Number(d?.total_feedback || 0) - Number(d?.analyzed_feedback || 0))));
+  const churnIntel = d?.churn_intelligence || {};
+  const topDrivers = Array.isArray(churnIntel?.why_users_are_leaving?.top_drivers)
+    ? churnIntel.why_users_are_leaving.top_drivers
+    : [];
+  const fixFirst = Array.isArray(churnIntel?.what_to_fix_first?.prioritized_issues)
+    ? churnIntel.what_to_fix_first.prioritized_issues
+    : [];
+  const riskSection = churnIntel?.who_is_at_risk || {};
+  const riskSummary = riskSection?.summary || { high: 0, medium: 0, low: 0, total: 0 };
+  const riskUsers = Array.isArray(riskSection?.users) ? riskSection.users : [];
+  const nextActions = Array.isArray(churnIntel?.what_to_do_next?.actions)
+    ? churnIntel.what_to_do_next.actions
+    : [];
+  const lookbackDays = Math.max(1, Number(churnIntel?.lookback_days || 90));
+  const riskWindowDays = Math.max(1, Number(churnIntel?.risk_window_days || 30));
+  const analyzedCount = Math.max(0, Number(d?.analyzed_feedback || 0));
+  const totalCount = Math.max(0, Number(d?.total_feedback || 0));
+  const negativePct = Number(d?.negative_sentiment || 0);
+  const sentimentCounts = d?.sentiment_counts || {};
+  const visibleTopDrivers = topDrivers.slice(0, 5);
+  const visibleFixFirst = fixFirst.slice(0, 5);
+
+  const ratioToPercent = (value) => `${Math.round(Math.max(0, Math.min(1, Number(value || 0))) * 100)}%`;
+  const trendBadgeClass = (trend) => {
+    const key = String(trend || '').toLowerCase();
+    if (key === 'rising') return 'border-rose-200 bg-rose-50 text-rose-700';
+    if (key === 'declining' || key === 'improving') return 'border-emerald-200 bg-emerald-50 text-emerald-700';
+    return 'border-slate-200 bg-slate-50 text-slate-600';
+  };
+  const trendLabel = (trend) => {
+    const key = String(trend || '').toLowerCase();
+    if (key === 'rising') return 'Rising';
+    if (key === 'declining') return 'Declining';
+    if (key === 'improving') return 'Improving';
+    if (key === 'degrading') return 'Degrading';
+    return 'Stable';
+  };
+  const riskLevelBadge = (riskLevel) => {
+    const key = String(riskLevel || '').toLowerCase();
+    if (key === 'high') return 'border-rose-200 bg-rose-50 text-rose-700';
+    if (key === 'medium') return 'border-amber-200 bg-amber-50 text-amber-700';
+    return 'border-emerald-200 bg-emerald-50 text-emerald-700';
+  };
+
+  const metricCards = [
+    {
+      label: 'Analyzed Feedback',
+      value: analyzedCount.toLocaleString(),
+      icon: MessageSquare,
+      iconClass: 'bg-indigo-50 text-indigo-600',
+      onClick: () => onNav('feedback'),
+    },
+    {
+      label: 'Left To Analyze',
+      value: pendingAnalysis.toLocaleString(),
+      icon: Clock,
+      iconClass: 'bg-slate-100 text-slate-600',
+      onClick: () => onNav('feedback'),
+    },
+    {
+      label: 'Negative Sentiment',
+      value: `${negativePct.toFixed(1)}%`,
+      icon: AlertTriangle,
+      iconClass: 'bg-rose-50 text-rose-600',
+    },
+    {
+      label: 'Active Issues',
+      value: Math.max(0, Number(d?.issue_count || 0)).toLocaleString(),
+      icon: AlertCircle,
+      iconClass: 'bg-amber-50 text-amber-700',
+    },
+    {
+      label: 'Customers',
+      value: Math.max(0, Number(d?.customer_count || 0)).toLocaleString(),
+      icon: Users,
+      iconClass: 'bg-emerald-50 text-emerald-700',
+      onClick: () => onNav('customers'),
+    },
+  ];
+
   return (
-    <div className="p-8 max-w-6xl mx-auto space-y-6">
-      <div className="mb-2"><h1 className="text-xl font-bold text-slate-900">Product Health Dashboard</h1><p className="text-sm text-slate-500">Overview of feedback intelligence metrics</p></div>
-      {/* Metrics Cards */}
-      <div className="grid grid-cols-4 gap-4">
-        {[
-          { label: 'Total Feedback', value: d.total_feedback, icon: MessageSquare, color: 'indigo', onClick: () => onNav('feedback') },
-          { label: 'Negative %', value: `${d.negative_sentiment}%`, icon: AlertTriangle, color: 'rose' },
-          { label: 'Active Issues', value: d.issue_count, icon: AlertCircle, color: 'amber', onClick: () => onNav('issues') },
-          { label: 'Customers', value: d.customer_count, icon: Users, color: 'emerald', onClick: () => onNav('customers') },
-        ].map((m, i) => (
-          <div key={i} onClick={m.onClick} className={`bg-white rounded-2xl border border-slate-200/60 p-5 ${m.onClick ? 'cursor-pointer hover:shadow-md hover:border-slate-300/80' : ''} transition-all`}>
+    <div className="mx-auto max-w-[1440px] space-y-8 px-4 py-5 sm:px-6 xl:px-8 2xl:px-10">
+      <div className="mb-2">
+        <h1 className="text-xl font-bold text-slate-900">Feedback Intelligence Dashboard</h1>
+        <p className="text-sm text-slate-500">Production churn intelligence for product, support, and retention teams.</p>
+        <p className="mt-1 text-xs font-semibold text-slate-600">
+          {analyzedCount.toLocaleString()} analyzed / {totalCount.toLocaleString()} total | {pendingAnalysis.toLocaleString()} left to analyze
+        </p>
+      </div>
+
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+        {metricCards.map((metric, idx) => (
+          <div
+            key={idx}
+            onClick={metric.onClick}
+            className={`bg-white rounded-2xl border border-slate-200/60 p-4 transition-all ${metric.onClick ? 'cursor-pointer hover:shadow-md hover:border-slate-300/80' : ''}`}
+          >
             <div className="flex items-center justify-between mb-3">
-              <div className={`w-10 h-10 rounded-xl bg-${m.color}-50 flex items-center justify-center`}><m.icon size={18} className={`text-${m.color}-500`} /></div>
-              {m.onClick && <ChevronRight size={14} className="text-slate-300" />}
+              <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${metric.iconClass}`}>
+                <metric.icon size={18} />
+              </div>
+              {metric.onClick && <ChevronRight size={14} className="text-slate-300" />}
             </div>
-            <p className="text-2xl font-bold text-slate-900">{m.value}</p>
-            <p className="text-xs text-slate-500 mt-1">{m.label}</p>
+            <p className="text-2xl font-bold text-slate-900">{metric.value}</p>
+            <p className="text-xs text-slate-500 mt-1">{metric.label}</p>
           </div>
         ))}
       </div>
-      {/* Top Issues & Rising */}
-      <div className="grid grid-cols-2 gap-6">
-        <div className="bg-white rounded-2xl border border-slate-200/60 p-6">
-          <h3 className="text-sm font-semibold text-slate-800 mb-4">Top Issues by Impact</h3>
-          {d.top_issues?.length > 0 ? (
-            <div className="space-y-2">
-              {d.top_issues.slice(0, 6).map((iss, i) => (
-                <div key={i} onClick={() => onViewIssue(iss.id)} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-100 cursor-pointer hover:bg-indigo-50 hover:border-indigo-200 transition-all">
-                  <div className="flex items-center gap-3">
-                    <span className="text-xs font-bold text-slate-400 w-5">#{i + 1}</span>
-                    <span className="text-sm font-medium text-slate-800">{iss.name}</span>
+
+      <div className="grid grid-cols-1 gap-7 2xl:grid-cols-2">
+        <div className="bg-white rounded-2xl border border-slate-200/60 p-6 xl:p-7">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h3 className="text-sm font-semibold text-slate-900">Why users are leaving</h3>
+              <p className="mt-1 text-xs text-slate-500">
+                Top churn drivers auto-clustered from the last {lookbackDays} days with sentiment and trend.
+              </p>
+            </div>
+            <span className="rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-indigo-700">
+              {topDrivers.length} drivers
+            </span>
+          </div>
+
+          {topDrivers.length > 0 ? (
+            <div className="mt-5 space-y-3">
+              {visibleTopDrivers.map((driver, index) => {
+                const issueId = Number(driver?.issue_id || 0);
+                const trendValue = String(driver?.trend || 'stable').toLowerCase();
+                const delta = Number(driver?.trend_delta_pct || 0);
+                return (
+                  <div key={`${driver.driver}-${index}`} className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-2.5">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <span className="text-[11px] font-black text-slate-400">#{index + 1}</span>
+                        <p className="text-sm font-semibold text-slate-900 truncate">{driver.driver}</p>
+                      </div>
+                      <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${trendBadgeClass(trendValue)}`}>
+                        {trendLabel(trendValue)}
+                        {Number.isFinite(delta) && delta !== 0 ? ` (${delta > 0 ? '+' : ''}${delta}%)` : ''}
+                      </span>
+                    </div>
+                    <div className="mt-2.5 flex flex-wrap items-center gap-1.5 text-[11px] font-semibold">
+                      <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-slate-700">
+                        {Number(driver.feedback_count || 0).toLocaleString()} mentions
+                      </span>
+                      <span className="rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-rose-700">
+                        {ratioToPercent(driver.negative_ratio)} negative
+                      </span>
+                    </div>
+                    <div className="mt-2.5 flex flex-wrap items-center gap-2 text-[11px] text-slate-600">
+                      <span>Avg sentiment: {Number(driver.avg_sentiment || 0).toFixed(2)}</span>
+                      <span>High risk flags: {Number(driver.high_risk_count || 0)}</span>
+                      {issueId > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => onViewIssue(issueId)}
+                          className="rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 font-semibold text-indigo-700 hover:bg-indigo-100"
+                        >
+                          Open linked issue
+                        </button>
+                      )}
+                    </div>
                   </div>
-                  <div className="flex items-center gap-3">
-                    {trendIcon(iss.trend)}
-                    <span className="text-sm font-bold text-indigo-600">{Math.round(iss.impact_score)}</span>
+                );
+              })}
+              {topDrivers.length > visibleTopDrivers.length && (
+                <p className="text-xs text-slate-500">
+                  Showing top {visibleTopDrivers.length} drivers. Open Inbox for deeper drill-down.
+                </p>
+              )}
+            </div>
+          ) : (
+            <p className="mt-4 text-sm text-slate-500">No analyzed feedback yet. Run analysis to identify churn drivers.</p>
+          )}
+        </div>
+
+        <div className="bg-white rounded-2xl border border-slate-200/60 p-6 xl:p-7">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h3 className="text-sm font-semibold text-slate-900">What to fix first</h3>
+              <p className="mt-1 text-xs text-slate-500">
+                Ranked by frequency plus negative sentiment pressure.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => onNav('feedback')}
+              className="rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700 hover:border-slate-300"
+            >
+              Open Inbox
+            </button>
+          </div>
+
+          {fixFirst.length > 0 ? (
+            <div className="mt-5 space-y-3">
+              {visibleFixFirst.map((item) => {
+                const issueId = Number(item?.issue_id || 0);
+                const tier = String(item?.priority_tier || 'P2').toUpperCase();
+                const tierClass = tier === 'P0'
+                  ? 'border-rose-200 bg-rose-50 text-rose-700'
+                  : tier === 'P1'
+                    ? 'border-amber-200 bg-amber-50 text-amber-700'
+                    : 'border-slate-200 bg-slate-50 text-slate-700';
+                return (
+                  <div key={`${item.driver}-${item.rank}`} className="rounded-xl border border-slate-200 bg-white px-4 py-3.5">
+                    <div className="flex flex-wrap items-start justify-between gap-2.5">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-slate-900 px-1.5 text-[11px] font-bold text-white">
+                          {item.rank}
+                        </span>
+                        <p className="text-sm font-semibold text-slate-900 truncate">{item.driver}</p>
+                      </div>
+                      <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.11em] ${tierClass}`}>
+                        {tier}
+                      </span>
+                    </div>
+                    <p className="mt-2 text-xs leading-5 text-slate-600">
+                      {item.why} Score: {Number(item.priority_score || 0).toFixed(2)}.
+                    </p>
+                    <div className="mt-2.5 flex flex-wrap items-center gap-2 text-[11px] text-slate-600">
+                      <span>Avg sentiment: {Number(item.avg_sentiment || 0).toFixed(2)}</span>
+                      <span>High risk flags: {Number(item.high_risk_count || 0)}</span>
+                      {issueId > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => onViewIssue(issueId)}
+                          className="rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 font-semibold text-indigo-700 hover:bg-indigo-100"
+                        >
+                          Open issue
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+              {fixFirst.length > visibleFixFirst.length && (
+                <p className="text-xs text-slate-500">
+                  Showing top {visibleFixFirst.length} priorities. Open Inbox for full ranking.
+                </p>
+              )}
+            </div>
+          ) : (
+            <p className="mt-4 text-sm text-slate-500">No fix-first list yet. Analyze feedback to rank issues automatically.</p>
+          )}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-7 2xl:grid-cols-2">
+        <div className="bg-white rounded-2xl border border-slate-200/60 p-6 xl:p-7">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h3 className="text-sm font-semibold text-slate-900">Who is at risk</h3>
+              <p className="mt-1 text-xs text-slate-500">
+                User risk tags from the last {riskWindowDays} days of analyzed feedback.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => onNav('customers')}
+              className="rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700 hover:border-slate-300"
+            >
+              Open Customers
+            </button>
+          </div>
+
+          <div className="mt-4 grid grid-cols-3 gap-2.5">
+            <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.11em] text-rose-600">High</p>
+              <p className="mt-1 text-xl font-black text-rose-700">{Number(riskSummary.high || 0).toLocaleString()}</p>
+            </div>
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.11em] text-amber-700">Medium</p>
+              <p className="mt-1 text-xl font-black text-amber-700">{Number(riskSummary.medium || 0).toLocaleString()}</p>
+            </div>
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.11em] text-emerald-700">Low</p>
+              <p className="mt-1 text-xl font-black text-emerald-700">{Number(riskSummary.low || 0).toLocaleString()}</p>
+            </div>
+          </div>
+
+          {riskUsers.length > 0 ? (
+            <div className="mt-4 space-y-2.5">
+              {riskUsers.slice(0, 6).map((user) => (
+                <div key={`risk-${user.customer_id}`} className="rounded-xl border border-slate-200 bg-slate-50/70 p-3.5">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-sm font-semibold text-slate-900 truncate">{user.customer_identifier}</p>
+                    <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.11em] ${riskLevelBadge(user.risk_level)}`}>
+                      {user.risk_level} risk
+                    </span>
+                  </div>
+                  <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px] text-slate-600">
+                    <span>Negative feedback: {Number(user.recent_negative_feedback || 0)}</span>
+                    <span>High churn flags: {Number(user.high_churn_flags || 0)}</span>
+                    <span className={`rounded-full border px-1.5 py-0.5 ${trendBadgeClass(user.sentiment_trend)}`}>
+                      {trendLabel(user.sentiment_trend)}
+                    </span>
                   </div>
                 </div>
               ))}
             </div>
-          ) : <p className="text-sm text-slate-400 py-4 text-center">No issues tracked yet</p>}
+          ) : (
+            <p className="mt-4 text-sm text-slate-500">No at-risk users detected yet for the selected data window.</p>
+          )}
         </div>
-        <div className="bg-white rounded-2xl border border-slate-200/60 p-6">
-          <h3 className="text-sm font-semibold text-slate-800 mb-4 flex items-center gap-2"><ArrowUpRight size={14} className="text-rose-500" /> Rising Issues</h3>
-          {d.rising_issues?.length > 0 ? (
-            <div className="space-y-2">{d.rising_issues.map((iss, i) => (
-              <div key={i} onClick={() => onViewIssue(iss.id)} className="flex items-center justify-between p-3 bg-rose-50 rounded-xl border border-rose-100 cursor-pointer hover:bg-rose-100 transition-all">
-                <span className="text-sm font-medium text-rose-800">{iss.name}</span>
-                <span className="text-xs font-bold text-rose-600">{iss.mention_count} mentions</span>
-              </div>
-            ))}</div>
-          ) : <p className="text-sm text-slate-400 py-4 text-center">No rising issues</p>}
+
+        <div className="bg-white rounded-2xl border border-slate-200/60 p-6 xl:p-7">
+          <h3 className="text-sm font-semibold text-slate-900">What to do next</h3>
+          <p className="mt-1 text-xs text-slate-500">
+            Ready-to-run actions generated from churn drivers and at-risk cohorts.
+          </p>
+          {nextActions.length > 0 ? (
+            <div className="mt-4 space-y-3">
+              {nextActions.map((action, index) => (
+                <div key={`action-${index}`} className="rounded-xl border border-slate-200 bg-white px-3.5 py-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-sm font-semibold text-slate-900">{action.title || `Action ${index + 1}`}</p>
+                    <span className="rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.11em] text-indigo-700">
+                      {String(action.priority || 'next').replace('_', ' ')}
+                    </span>
+                  </div>
+                  <p className="mt-1.5 text-sm text-slate-700">{action.action}</p>
+                  {action.reason && (
+                    <p className="mt-1 text-xs text-slate-500">{action.reason}</p>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="mt-4 text-sm text-slate-500">Action suggestions will appear once analyzed feedback is available.</p>
+          )}
         </div>
       </div>
-      {/* Recent Feedback */}
-      <div className="bg-white rounded-2xl border border-slate-200/60 p-6">
-        <h3 className="text-sm font-semibold text-slate-800 mb-4">Recent Feedback</h3>
-        {d.recent_feedback?.length > 0 ? (
-          <div className="space-y-2">{d.recent_feedback.map((f, i) => {
-            const sentimentUi = sentimentDisplayForFeedback(f);
-            return (
-              <div key={i} className="flex items-start justify-between p-3 bg-slate-50 rounded-xl border border-slate-100 gap-4">
-                <p className="text-sm text-slate-700 flex-1 line-clamp-1">{f.text}</p>
-                <div className="flex items-center gap-2 shrink-0">
-                  {f.issue_name && <span className="text-[10px] text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full font-medium">{f.issue_name}</span>}
-                  <span className={`px-2 py-0.5 text-[10px] font-semibold rounded-full border ${sentimentUi.className}`}>{sentimentUi.label}</span>
-                </div>
-              </div>
-            );
-          })}</div>
-        ) : <p className="text-sm text-slate-400 py-4 text-center">No feedback yet. Import data or add feedback manually.</p>}
+
+      <div className="grid grid-cols-1 gap-7 2xl:grid-cols-2">
+        <div className="bg-white rounded-2xl border border-slate-200/60 p-6 xl:p-7">
+          <h3 className="text-sm font-semibold text-slate-900 mb-4">Sentiment mix</h3>
+          <div className="grid grid-cols-3 gap-2.5">
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2">
+              <p className="text-[10px] uppercase tracking-[0.11em] font-semibold text-emerald-700">Positive</p>
+              <p className="mt-1 text-xl font-black text-emerald-700">{Number(sentimentCounts.positive || 0).toLocaleString()}</p>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+              <p className="text-[10px] uppercase tracking-[0.11em] font-semibold text-slate-700">Neutral</p>
+              <p className="mt-1 text-xl font-black text-slate-700">{Number(sentimentCounts.neutral || 0).toLocaleString()}</p>
+            </div>
+            <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2">
+              <p className="text-[10px] uppercase tracking-[0.11em] font-semibold text-rose-700">Negative</p>
+              <p className="mt-1 text-xl font-black text-rose-700">{Number(sentimentCounts.negative || 0).toLocaleString()}</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-2xl border border-slate-200/60 p-6 xl:p-7">
+          <h3 className="text-sm font-semibold text-slate-900 mb-4">Recent feedback</h3>
+          {d.recent_feedback?.length > 0 ? (
+            <div className="space-y-2">
+              {d.recent_feedback.map((feedbackItem, idx) => {
+                const sentimentUi = sentimentDisplayForFeedback(feedbackItem);
+                return (
+                  <div key={idx} className="flex items-start justify-between gap-4 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5">
+                    <p className="flex-1 text-sm text-slate-700 line-clamp-1">{feedbackItem.text}</p>
+                    <div className="shrink-0 flex items-center gap-2">
+                      {feedbackItem.issue_name && (
+                        <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-medium text-indigo-600">
+                          {feedbackItem.issue_name}
+                        </span>
+                      )}
+                      <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${sentimentUi.className}`}>
+                        {sentimentUi.label}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="text-sm text-slate-500">No feedback yet. Import data or add feedback manually.</p>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -3818,8 +4899,6 @@ const FeedbackInboxView = ({
   onFilterSentiment,
   filterPriority,
   onFilterPriority,
-  filterRating,
-  onFilterRating,
   filterSource,
   onFilterSource,
   filterStartDate,
@@ -3864,20 +4943,56 @@ const FeedbackInboxView = ({
         : `${sourceValue}${count > 0 ? ` - ${count}` : ''}`;
       return {
         key: `${sourceValue}:${sourceType || 'unknown'}`,
-        value: sourceValue,
+        value: encodeFeedbackSourceFilter(sourceValue, sourceType),
         label,
       };
     })
     .filter(Boolean);
-  const activeFilterCount = [search?.trim(), filterStatus, filterSentiment, filterPriority, filterRating, filterSource, filterStartDate, filterEndDate].filter(Boolean).length;
-  const totalCount = Math.max(0, Number(data?.total || 0));
-  const pageLimit = Math.max(1, Number(data?.limit || feedbackLimit || 100));
-  const pageOffset = Math.max(0, Number(data?.offset || feedbackOffset || 0));
+  const selectedStarFilters = normalizeSelectedStars(analysisSelectedStars);
+  const activeFilterCount = [
+    search?.trim(),
+    filterStatus,
+    filterSentiment,
+    filterPriority,
+    filterSource,
+    filterStartDate,
+    filterEndDate,
+    selectedStarFilters.length ? selectedStarFilters.join(',') : '',
+  ].filter(Boolean).length;
+  const fullFilteredTotal = Math.max(0, Number(data?.total || 0));
+  const totalCount = Math.max(0, Number(data?.selection_total ?? fullFilteredTotal));
+  const pageLimit = Math.max(1, Number(feedbackLimit || data?.limit || 100));
+  const pageOffset = Math.max(0, Number((data?.selection_offset ?? feedbackOffset) || 0));
   const rowsOnPage = Array.isArray(data?.items) ? data.items.length : 0;
   const pageStart = totalCount === 0 ? 0 : pageOffset + 1;
   const pageEnd = totalCount === 0 ? 0 : Math.min(totalCount, pageOffset + rowsOnPage);
   const canPrevPage = pageOffset > 0;
   const canNextPage = pageOffset + rowsOnPage < totalCount;
+  const normalizedAnalysisLimit = Number.isFinite(Number(analysisLimit)) && Number(analysisLimit) > 0
+    ? Math.max(1, Math.min(5000, Math.floor(Number(analysisLimit))))
+    : null;
+  const normalizedAnalysisStart = Number.isFinite(Number(analysisStartIndex)) && Number(analysisStartIndex) > 0
+    ? Math.max(1, Math.floor(Number(analysisStartIndex)))
+    : null;
+  const normalizedAnalysisEnd = Number.isFinite(Number(analysisEndIndex)) && Number(analysisEndIndex) > 0
+    ? Math.max(1, Math.floor(Number(analysisEndIndex)))
+    : null;
+  const normalizedRangeStart = normalizedAnalysisStart && normalizedAnalysisEnd
+    ? Math.min(normalizedAnalysisStart, normalizedAnalysisEnd)
+    : normalizedAnalysisStart;
+  const normalizedRangeEnd = normalizedAnalysisStart && normalizedAnalysisEnd
+    ? Math.max(normalizedAnalysisStart, normalizedAnalysisEnd)
+    : normalizedAnalysisEnd;
+  const analysisRangeSize = normalizedRangeStart && normalizedRangeEnd
+    ? Math.max(0, normalizedRangeEnd - normalizedRangeStart + 1)
+    : normalizedRangeStart
+      ? Math.max(0, fullFilteredTotal - normalizedRangeStart + 1)
+      : normalizedRangeEnd && !normalizedRangeStart
+        ? normalizedRangeEnd
+        : null;
+  const effectiveAnalysisCount = analysisRangeSize && normalizedAnalysisLimit
+    ? Math.min(normalizedAnalysisLimit, analysisRangeSize)
+    : normalizedAnalysisLimit;
   const topHorizontalScrollRef = useRef(null);
   const topHorizontalTrackRef = useRef(null);
   const tableHorizontalScrollRef = useRef(null);
@@ -3912,7 +5027,7 @@ const FeedbackInboxView = ({
   }, [data?.items, totalCount, pageLimit, pageOffset, loading]);
 
   return (
-    <div className="p-6 xl:p-8 max-w-[1440px] mx-auto space-y-4">
+    <div className="w-full space-y-4 px-4 py-4 sm:px-5 xl:px-6 2xl:px-8">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h1 className="text-xl font-bold text-slate-900">Feedback Inbox</h1>
@@ -3947,7 +5062,6 @@ const FeedbackInboxView = ({
               source: filterSource || null,
               startDate: filterStartDate || null,
               endDate: filterEndDate || null,
-              rating: filterRating ? Number(filterRating) : null,
               ratingValues: Array.isArray(analysisSelectedStars) ? analysisSelectedStars : [],
               status: filterStatus || null,
               limit: analysisLimit ? Number(analysisLimit) : null,
@@ -3972,7 +5086,7 @@ const FeedbackInboxView = ({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-[300px_minmax(0,1fr)] gap-4 items-start min-w-0">
+      <div className="grid grid-cols-1 xl:grid-cols-[270px_minmax(0,1fr)] 2xl:grid-cols-[290px_minmax(0,1fr)] gap-4 items-start min-w-0">
         <aside className="bg-white rounded-2xl border border-slate-200/60 p-5 space-y-4 xl:sticky xl:top-6">
           <div className="flex items-start justify-between gap-3">
             <div>
@@ -3980,14 +5094,14 @@ const FeedbackInboxView = ({
               <h2 className="text-sm font-semibold text-slate-900 mt-1">Review stream controls</h2>
             </div>
             <span className="px-2.5 py-1 rounded-full bg-slate-50 border border-slate-200 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">
-              {data.total} reviews
+              {totalCount} reviews
             </span>
           </div>
 
           <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
             <p className="text-xs text-slate-500">Active filters</p>
             <p className="text-2xl font-bold text-slate-900 mt-1">{activeFilterCount}</p>
-            <p className="text-[11px] text-slate-400 mt-1">Search, source, status, sentiment, priority, star rating, and date range update this table.</p>
+            <p className="text-[11px] text-slate-400 mt-1">Search, source, status, sentiment, priority, date range, and selected stars update this table.</p>
           </div>
 
           <div>
@@ -4008,7 +5122,6 @@ const FeedbackInboxView = ({
             { value: filterStatus, onChange: onFilterStatus, options: ['', 'open', 'resolved'], label: 'Status' },
             { value: filterSentiment, onChange: onFilterSentiment, options: ['', 'positive', 'neutral', 'negative'], label: 'Sentiment' },
             { value: filterPriority, onChange: onFilterPriority, options: ['', 'low', 'medium', 'high', 'critical'], label: 'Priority' },
-            { value: filterRating, onChange: onFilterRating, options: ['', '5', '4', '3', '2', '1'], label: 'Star Rating' },
           ].map((filterItem) => (
             <div key={filterItem.label}>
               <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">{filterItem.label}</label>
@@ -4019,7 +5132,7 @@ const FeedbackInboxView = ({
               >
                 <option value="">All {filterItem.label}</option>
                 {filterItem.options.filter(Boolean).map(option => (
-                  <option key={option} value={option} className="capitalize">{filterItem.label === 'Star Rating' ? `${option} Star` : option}</option>
+                  <option key={option} value={option} className="capitalize">{option}</option>
                 ))}
               </select>
             </div>
@@ -4047,7 +5160,7 @@ const FeedbackInboxView = ({
           </div>
 
           <div>
-            <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Reviews For Analysis</label>
+            <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Reviews To Analyze</label>
             <input
               type="number"
               min={1}
@@ -4065,7 +5178,17 @@ const FeedbackInboxView = ({
               placeholder="e.g. 20"
               className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-indigo-300"
             />
-            <p className="mt-1 text-[10px] text-slate-400">Exact number of reviews to analyze. Leave blank only if you use a review range.</p>
+            <p className="mt-1 text-[10px] text-slate-400">
+              {analysisRangeSize === 0
+                ? 'The current review range does not include any reviews.'
+                : analysisRangeSize && effectiveAnalysisCount
+                ? `Will analyze up to ${effectiveAnalysisCount.toLocaleString()} reviews from the selected range after applying the star checkboxes.`
+                : analysisRangeSize
+                  ? 'Leave this blank to analyze the full selected range after applying the star checkboxes.'
+                  : effectiveAnalysisCount
+                    ? `Will analyze up to ${effectiveAnalysisCount.toLocaleString()} reviews after applying the star checkboxes.`
+                    : 'Optional cap for analysis volume after applying the range and star checkboxes.'}
+            </p>
           </div>
 
           <div className="grid grid-cols-2 gap-2">
@@ -4094,10 +5217,10 @@ const FeedbackInboxView = ({
           </div>
 
           <div>
-            <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Stars For Analysis</label>
+            <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Stars</label>
             <div className="grid grid-cols-5 gap-1.5">
               {[1, 2, 3, 4, 5].map((star) => {
-                const selected = Array.isArray(analysisSelectedStars) && analysisSelectedStars.includes(star);
+                const selected = selectedStarFilters.includes(star);
                 return (
                   <label
                     key={`analysis-star-${star}`}
@@ -4112,10 +5235,10 @@ const FeedbackInboxView = ({
                       className="h-3 w-3 rounded border-slate-300"
                       checked={selected}
                       onChange={() => {
-                        const current = Array.isArray(analysisSelectedStars) ? analysisSelectedStars : [];
+                        const current = selectedStarFilters;
                         const next = selected
                           ? current.filter((value) => value !== star)
-                          : [...current, star].sort((a, b) => a - b);
+                          : normalizeSelectedStars([...current, star]);
                         onAnalysisSelectedStars?.(next);
                       }}
                     />
@@ -4125,15 +5248,15 @@ const FeedbackInboxView = ({
               })}
             </div>
             <p className="mt-1 text-[10px] text-slate-400">
-              Selected: {Array.isArray(analysisSelectedStars) && analysisSelectedStars.length
-                ? [...analysisSelectedStars].sort((a, b) => a - b).map((star) => `${star}★`).join(', ')
+              Selected: {selectedStarFilters.length
+                ? selectedStarFilters.map((star) => `${star}★`).join(', ')
                 : 'All stars'}
             </p>
           </div>
 
           <div className="flex flex-col gap-2 pt-1">
             <button
-              onClick={() => onRefresh({ offset: 0 })}
+              onClick={() => onRefresh({ offset: 0, ratingValues: selectedStarFilters })}
               className="w-full px-4 py-2.5 rounded-xl bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 transition-all"
             >
               Apply / Refresh Results
@@ -4141,18 +5264,18 @@ const FeedbackInboxView = ({
             <button
               onClick={() => {
                 onClearFilters();
-                onAnalysisStartIndex?.('');
-                onAnalysisEndIndex?.('');
-                onAnalysisSelectedStars?.([]);
                 onRefresh({
                   search: '',
                   status: '',
                   sentiment: '',
                   priority: '',
-                  rating: '',
                   source: '',
                   startDate: '',
                   endDate: '',
+                  ratingValues: [],
+                  maxCount: '',
+                  startIndex: '',
+                  endIndex: '',
                   offset: 0,
                 });
               }}
@@ -4163,7 +5286,7 @@ const FeedbackInboxView = ({
           </div>
         </aside>
 
-        <section className="bg-white rounded-2xl border border-slate-200/60 min-w-0 h-[72vh] xl:h-[calc(100vh-3rem)] flex flex-col overflow-hidden xl:sticky xl:top-6">
+        <section className="bg-white rounded-2xl border border-slate-200/60 min-w-0 h-[72vh] min-h-[460px] xl:h-[calc(100vh-11rem)] flex flex-col overflow-hidden xl:sticky xl:top-6">
           <div className="flex items-center justify-between gap-3 border-b border-slate-200 bg-slate-50/70 px-4 py-3">
             <p className="text-xs font-semibold text-slate-500">Inbox Source View</p>
             <select
@@ -4183,27 +5306,93 @@ const FeedbackInboxView = ({
             <div className="flex flex-1 items-center justify-center"><Loader2 size={24} className="animate-spin text-indigo-500" /></div>
           ) : (
             <>
-              <div className="z-30 border-b border-slate-200 bg-white/95 px-4 py-2 backdrop-blur supports-[backdrop-filter]:bg-white/80">
+              <div className="hidden lg:block z-30 border-b border-slate-200 bg-white/95 px-4 py-2 backdrop-blur supports-[backdrop-filter]:bg-white/80">
                 <div
                   ref={topHorizontalScrollRef}
                   onScroll={() => syncHorizontalScroll(topHorizontalScrollRef, tableHorizontalScrollRef)}
                   className="overflow-x-auto custom-scrollbar"
                   style={{ WebkitOverflowScrolling: 'touch' }}
-                  aria-label="Top horizontal scroll"
+                  aria-label="Table horizontal scroll"
                 >
-                  <div ref={topHorizontalTrackRef} className="h-3 min-w-full" />
+                  <div ref={topHorizontalTrackRef} className="h-2.5 min-w-full" />
+                </div>
+              </div>
+              <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar lg:hidden">
+                <div className="divide-y divide-slate-100">
+                  {data.items.map((f) => {
+                    const sentimentUi = sentimentDisplayForFeedback(f);
+                    const priorityUi = priorityDisplayForFeedback(f);
+                    return (
+                      <div key={`mobile-${f.id}`} className="space-y-3 px-4 py-4">
+                        <p className="text-sm leading-6 text-slate-700 whitespace-pre-wrap break-words">{f.text || 'No review text available.'}</p>
+                        <div className="grid grid-cols-2 gap-2 text-xs text-slate-500">
+                          <p><span className="font-semibold text-slate-700">Source:</span> {f.source || 'Unknown'}</p>
+                          <p><span className="font-semibold text-slate-700">Customer:</span> {f.customer_identifier || 'Anonymous'}</p>
+                          <p><span className="font-semibold text-slate-700">Date:</span> {formatDateLabel(f.created_at)}</p>
+                          <p>
+                            <span className="font-semibold text-slate-700">Rating:</span>{' '}
+                            {Number.isFinite(Number(f.rating)) && Number(f.rating) > 0 ? `${Math.max(1, Math.min(5, Math.round(Number(f.rating))))} Star` : '-'}
+                          </p>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className={`px-2 py-0.5 text-[10px] font-semibold rounded-full border capitalize ${sentimentUi.className}`}>{sentimentUi.label}</span>
+                          {priorityUi.editable ? (
+                            <select value={priorityUi.priority} onChange={e => onUpdatePriority(f.id, e.target.value)} className={`px-2 py-0.5 text-[10px] font-semibold rounded-full border cursor-pointer outline-none capitalize ${priorityUi.className}`}>
+                              {['low', 'medium', 'high', 'critical'].map(p => <option key={`${f.id}-${p}`} value={p}>{p}</option>)}
+                            </select>
+                          ) : (
+                            <span className={`px-2 py-0.5 text-[10px] font-semibold rounded-full border ${priorityUi.className}`}>{priorityUi.label}</span>
+                          )}
+                          <button onClick={() => onUpdateStatus(f.id, f.status === 'open' ? 'resolved' : 'open')} className={`px-2 py-0.5 text-[10px] font-semibold rounded-full border cursor-pointer ${statusBg(f.status)}`}>
+                            {f.status === 'open' ? 'Open' : 'Resolved'}
+                          </button>
+                          <span className={`text-xs font-medium ${isFeedbackAnalyzed(f) ? 'text-indigo-600' : 'text-slate-500'}`}>{issueDisplayForFeedback(f)}</span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => onGenerateResponse(f.text, f.issue_name, '')}
+                            disabled={!llmConnected}
+                            className="text-indigo-500 hover:text-indigo-700 p-1.5 rounded-lg hover:bg-indigo-50 transition-all disabled:cursor-not-allowed disabled:text-slate-300 disabled:hover:bg-transparent"
+                            title={llmConnected ? 'Generate AI Response' : 'Enable LLM usage to generate AI responses'}
+                          >
+                            <Sparkles size={14} />
+                          </button>
+                          <button
+                            onClick={() => onGenerateOutreach?.(f.id)}
+                            disabled={outreachGeneratingId === f.id}
+                            className="text-emerald-600 hover:text-emerald-700 p-1.5 rounded-lg hover:bg-emerald-50 transition-all disabled:cursor-not-allowed disabled:text-slate-300 disabled:hover:bg-transparent"
+                            title="Generate instant offer outreach from knowledge base"
+                          >
+                            {outreachGeneratingId === f.id ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {data.items.length === 0 && (
+                    <div className="px-4 py-16 text-center text-slate-400">No feedback found for the selected filters.</div>
+                  )}
                 </div>
               </div>
               <div
                 ref={tableHorizontalScrollRef}
                 onScroll={() => syncHorizontalScroll(tableHorizontalScrollRef, topHorizontalScrollRef)}
-                className="relative flex-1 min-h-0 overflow-auto custom-scrollbar min-w-0"
+                className="relative hidden flex-1 min-h-0 overflow-auto custom-scrollbar min-w-0 lg:block"
                 style={{ WebkitOverflowScrolling: 'touch' }}
               >
-                <table className="w-full min-w-[1280px] text-sm">
+                <table className="w-full min-w-[1040px] text-sm">
                   <thead className="sticky top-0 z-20 bg-slate-50">
                     <tr className="bg-slate-50 border-b border-slate-200">
-                      {['Review', 'Source', 'Customer', 'Date', 'Rating', 'Sentiment', 'Priority', 'Status', 'Issue', 'Actions'].map(h => <th key={h} className="bg-slate-50 text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">{h}</th>)}
+                      <th className="bg-slate-50 text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider w-[36%]">Review</th>
+                      <th className="bg-slate-50 text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider w-[10%]">Source</th>
+                      <th className="bg-slate-50 text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider w-[11%]">Customer</th>
+                      <th className="bg-slate-50 text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider w-[9%]">Date</th>
+                      <th className="bg-slate-50 text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider w-[7%]">Rating</th>
+                      <th className="bg-slate-50 text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider w-[8%]">Sentiment</th>
+                      <th className="bg-slate-50 text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider w-[8%]">Priority</th>
+                      <th className="bg-slate-50 text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider w-[7%]">Status</th>
+                      <th className="bg-slate-50 text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider w-[8%]">Issue</th>
+                      <th className="bg-slate-50 text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider w-[6%]">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -4212,12 +5401,12 @@ const FeedbackInboxView = ({
                       const priorityUi = priorityDisplayForFeedback(f);
                       return (
                         <tr key={f.id} className="border-b border-slate-100 align-top hover:bg-slate-50/50 transition-colors">
-                          <td className="px-4 py-4 min-w-[360px] max-w-[560px]">
+                          <td className="px-4 py-4 min-w-[260px] max-w-[420px]">
                             <p className="text-sm leading-6 text-slate-700 whitespace-pre-wrap break-words">{f.text || 'No review text available.'}</p>
                           </td>
                           <td className="px-4 py-4"><span className="text-xs font-semibold text-slate-700 capitalize">{f.source || 'Unknown'}</span></td>
                           <td className="px-4 py-4"><span className="text-xs text-slate-600">{f.customer_identifier || 'Anonymous'}</span></td>
-                          <td className="px-4 py-4"><span className="text-xs text-slate-500 whitespace-nowrap">{f.created_at?.split('T')[0] || '-'}</span></td>
+                          <td className="px-4 py-4"><span className="text-xs text-slate-500 whitespace-nowrap">{formatDateLabel(f.created_at)}</span></td>
                           <td className="px-4 py-4">
                             <span className="text-xs font-semibold text-amber-700 whitespace-nowrap">
                               {Number.isFinite(Number(f.rating)) && Number(f.rating) > 0 ? `${Math.max(1, Math.min(5, Math.round(Number(f.rating))))} Star` : '-'}
@@ -4247,7 +5436,7 @@ const FeedbackInboxView = ({
                                 onClick={() => onGenerateResponse(f.text, f.issue_name, '')}
                                 disabled={!llmConnected}
                                 className="text-indigo-500 hover:text-indigo-700 p-1.5 rounded-lg hover:bg-indigo-50 transition-all disabled:cursor-not-allowed disabled:text-slate-300 disabled:hover:bg-transparent"
-                          title={llmConnected ? 'Generate AI Response' : 'Enable LLM usage to generate AI responses'}
+                                title={llmConnected ? 'Generate AI Response' : 'Enable LLM usage to generate AI responses'}
                               >
                                 <Sparkles size={14} />
                               </button>
@@ -5522,6 +6711,7 @@ const ConnectorsView = ({ data, loading, onRefresh }) => {
                   <option value="hourly">Hourly</option>
                   <option value="daily">Daily</option>
                   <option value="weekly">Weekly</option>
+                  <option value="on_new">On New Reviews</option>
                   <option value="manual">Manual Only</option>
                 </select>
               </div>
@@ -5540,3 +6730,4 @@ const ConnectorsView = ({ data, loading, onRefresh }) => {
 };
 
 export default FeedbackCRM;
+

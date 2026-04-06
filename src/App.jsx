@@ -11,7 +11,6 @@ import Footer from './components/Footer';
 import Background from './components/Background';
 import Particles from './components/Particles';
 import MouseSpotlight from './components/MouseSpotlight';
-import { useEffect, useState } from 'react';
 import PromoBanner from './components/PromoBanner';
 import YearProgress from './components/YearProgress';
 import IQ from './components/IQ';
@@ -21,8 +20,6 @@ import HorizonStandalone from './components/HorizonStandalone';
 
 import AdvancedScrollManager from './components/ScrollManager';
 import { HorizonAvailabilityNoticeProvider } from './components/HorizonAvailabilityNoticeProvider';
-
-const DESKTOP_MIN_WIDTH = 1024;
 
 const DesktopOnlyFallback = () => (
   <div className="relative min-h-screen overflow-hidden bg-[radial-gradient(circle_at_12%_12%,rgba(34,211,238,0.2),transparent_24%),radial-gradient(circle_at_86%_14%,rgba(59,130,246,0.16),transparent_28%),linear-gradient(180deg,#f8fbfe_0%,#eef5fb_100%)] px-5 py-8 text-slate-900">
@@ -47,21 +44,21 @@ const DesktopOnlyFallback = () => (
             Horizon FI
           </div>
           <p className="mt-5 text-[11px] font-semibold uppercase tracking-[0.24em] text-cyan-700">
-            Desktop Experience
+            Temporarily Locked
           </p>
           <h1 className="mt-3 text-3xl font-semibold leading-tight text-slate-950 sm:text-[42px]">
-            Horizon FI is available on desktop screens only.
+            Horizon FI will be available soon.
           </h1>
           <p className="mx-auto mt-4 max-w-[26rem] text-[15px] leading-relaxed text-slate-600 sm:text-base">
-            Please visit on a desktop or laptop to continue.
+            We are finalizing launch readiness and will open Horizon access very soon.
           </p>
 
           <div className="mt-7 rounded-[22px] border border-slate-200 bg-slate-50 px-4 py-4 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.8)]">
             <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">
-              Recommended Width
+              Status
             </p>
             <p className="mt-2 text-lg font-semibold text-slate-950">
-              1024px or wider
+              Available Soon
             </p>
           </div>
 
@@ -122,26 +119,7 @@ function AppShell() {
   const location = useLocation();
   const isHorizonRoute = location.pathname.startsWith('/horizon');
   const isHomeRoute = location.pathname === '/';
-  const [isDesktopViewport, setIsDesktopViewport] = useState(() => {
-    if (typeof window === 'undefined') {
-      return true;
-    }
-
-    return window.innerWidth >= DESKTOP_MIN_WIDTH;
-  });
-
-  useEffect(() => {
-    const updateViewportState = () => {
-      setIsDesktopViewport(window.innerWidth >= DESKTOP_MIN_WIDTH);
-    };
-
-    updateViewportState();
-    window.addEventListener('resize', updateViewportState);
-
-    return () => window.removeEventListener('resize', updateViewportState);
-  }, []);
-
-  if (!isDesktopViewport) {
+  if (isHorizonRoute) {
     return <DesktopOnlyFallback />;
   }
 

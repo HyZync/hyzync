@@ -28,7 +28,7 @@ SECRET_CONFIG_KEYS = {
     "bearer_token",
     "webhook_secret",
 }
-VALID_INTERVALS = {"manual", "hourly", "daily", "weekly"}
+VALID_INTERVALS = {"manual", "hourly", "daily", "weekly", "on_new"}
 VALID_THEME_MODES = {"light", "dark", "system"}
 VALID_DIGEST_FREQUENCIES = {"off", "daily", "weekly"}
 VALID_PLAN_STATUSES = {"active", "trialing", "past_due", "cancelled", "paused"}
@@ -732,6 +732,7 @@ def update_connector_settings(
         conn.close()
         return None
 
+    source_type = str(row.get("source_type") or "").strip().lower()
     config = _load_json(row.get("config"), {})
     incoming_config = payload.get("config") or {}
     if isinstance(incoming_config, dict):
@@ -743,10 +744,29 @@ def update_connector_settings(
                 continue
             config[key] = value
 
+    if source_type in {"api", "generic_api", "webhook"}:
+        endpoint_value = incoming_config.get("api_url")
+        if endpoint_value is None:
+            endpoint_value = incoming_config.get("url")
+        if endpoint_value is None:
+            endpoint_value = incoming_config.get("endpoint")
+        if endpoint_value is not None:
+            endpoint_text = str(endpoint_value).strip()
+            if endpoint_text:
+                config["api_url"] = endpoint_text
+                config["url"] = endpoint_text
+                config["endpoint"] = endpoint_text
+            else:
+                config.pop("api_url", None)
+                config.pop("url", None)
+                config.pop("endpoint", None)
+
     if payload.get("max_reviews") is not None:
         max_reviews = _safe_int(payload.get("max_reviews"), config.get("count") or config.get("max_reviews") or 200, minimum=1)
         config["count"] = max_reviews
         config["max_reviews"] = max_reviews
+    elif config.get("count") is not None and config.get("max_reviews") is None:
+        config["max_reviews"] = _safe_int(config.get("count"), 200, minimum=1)
 
     fetch_interval = _normalize_interval(payload.get("fetch_interval"), row.get("fetch_interval") or "manual")
     analysis_interval = _normalize_interval(payload.get("analysis_interval"), row.get("analysis_interval") or fetch_interval)

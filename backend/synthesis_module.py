@@ -1,5 +1,6 @@
 import logging
 import concurrent.futures
+import time
 from typing import List, Dict, Any
 import sys
 import os
@@ -78,44 +79,65 @@ def batch_synthesize_labels(categorized_data: Dict[str, Any], raw_reviews: List[
     list_sections = ['top_issues', 'top_features']
     
     tasks = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=5)
+    try:
         # Process Quadrants
         for section in sections:
             for item in categorized_data.get(section, []):
                 label = item.get('category')
-                # ... same as before
                 process_item(item, label, 'category', tasks, executor, vague_threshold, raw_reviews, vertical)
-        
+
         # Process Lists (Thematic)
         for section in list_sections:
             for item in categorized_data.get(section, []):
                 label = item.get('name')
+                if not isinstance(label, str) or not label.strip():
+                    continue
+
                 indices = item.get('review_indices', [])
-                
                 if (label in vague_threshold or len(label.split()) < 2):
                     # For thematic aggregates, we might not have indices yet.
                     # Fallback to searching raw_reviews for mentions of this label if indices missing
                     if not indices and raw_reviews:
                         indices = [i for i, r in enumerate(raw_reviews) if label.lower() in str(r.get('content', '')).lower()]
-                    
+
                     if indices:
                         cluster_reviews = [raw_reviews[i] for i in indices if i < len(raw_reviews)]
                         if cluster_reviews:
                             future = executor.submit(synthesize_cluster_label, label, cluster_reviews, vertical)
                             tasks.append((item, future, label, 'name'))
-        
-        # Process any other nested structures if needed...
-        
-        # Collect results
-        for item, future, old_label, key_name in tasks:
-            try:
-                new_label = future.result(timeout=45)
-                if new_label and new_label != old_label:
-                    logger.info(f"Synthesized label: '{old_label}' -> '{new_label}'")
-                    item[key_name] = new_label
-            except Exception as e:
-                logger.error(f"Synthesis task failed for {old_label}: {e}")
-    
+
+        # Collect completed futures with a hard wall-clock budget so we never
+        # block the caller indefinitely during finalization.
+        if tasks:
+            deadline = time.time() + 20.0
+            future_map = {future: (item, old_label, key_name) for item, future, old_label, key_name in tasks}
+            pending = set(future_map.keys())
+
+            while pending and time.time() < deadline:
+                remaining = max(0.05, deadline - time.time())
+                done, pending = concurrent.futures.wait(
+                    pending,
+                    timeout=min(0.75, remaining),
+                    return_when=concurrent.futures.FIRST_COMPLETED,
+                )
+                for future in done:
+                    item, old_label, key_name = future_map[future]
+                    try:
+                        new_label = future.result()
+                        if new_label and new_label != old_label:
+                            logger.info(f"Synthesized label: '{old_label}' -> '{new_label}'")
+                            item[key_name] = new_label
+                    except Exception as e:
+                        logger.error(f"Synthesis task failed for {old_label}: {e}")
+
+            if pending:
+                for future in pending:
+                    future.cancel()
+                logger.warning("Synthesis reached time budget; %s task(s) were skipped.", len(pending))
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
+
     return categorized_data
 
 def process_item(item, label, key_name, tasks, executor, vague_threshold, raw_reviews, vertical):

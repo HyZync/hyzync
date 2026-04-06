@@ -73,13 +73,16 @@ const buildConnectorDrafts = (connectors = []) => {
   const drafts = {};
   connectors.forEach((connector) => {
     const config = connector?.config || {};
+    const endpointFallback = ['api', 'generic_api', 'webhook'].includes(String(connector?.connector_type || '').toLowerCase())
+      ? (connector?.identifier || '')
+      : '';
     drafts[connector.id] = {
       name: connector?.name || '',
       fetch_interval: connector?.fetch_interval || 'manual',
       analysis_interval: connector?.analysis_interval || 'manual',
       max_reviews: Number(config.count || config.max_reviews || 200),
       country: config.country || 'us',
-      endpoint: config.url || config.endpoint || '',
+      endpoint: config.api_url || config.url || config.endpoint || endpointFallback,
       method: config.method || 'GET',
       auth_value: '',
     };
@@ -431,7 +434,11 @@ const HorizonWorkspaceOps = ({
         country: draft.country,
         method: draft.method,
       };
-      if (draft.endpoint) nextConfig.url = draft.endpoint;
+      if (draft.endpoint) {
+        nextConfig.api_url = draft.endpoint;
+        nextConfig.url = draft.endpoint;
+        nextConfig.endpoint = draft.endpoint;
+      }
       if (draft.auth_value?.trim()) nextConfig.auth_value = draft.auth_value.trim();
       const res = await apiFetch(`${API_BASE}/api/user/connectors/${connectorId}`, {
         method: 'PATCH',

@@ -4,7 +4,7 @@ import {
     RefreshCw, ChevronRight, Star, Activity, AlertTriangle,
     CheckCircle2, Loader2, TrendingUp, TrendingDown,
     Mail, Building2, CreditCard, Calendar, Tag, MessageSquare,
-    BarChart3, Trash2, Edit3, Clock, Zap, Brain
+    BarChart3, Trash2, Edit3, Clock, Zap, Brain, Copy, Sparkles
 } from 'lucide-react';
 import {
     LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer,
@@ -64,6 +64,347 @@ const SentimentBadge = ({ score }) => {
 };
 
 // ─── CSV Parser ───────────────────────────────────────────────────────────────
+const parseNumeric = (value, fallback = null) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const cleanInsightLabel = (value = '') =>
+    String(value || '')
+        .replace(/[_-]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+const titleCase = (value = '') =>
+    cleanInsightLabel(value)
+        .split(' ')
+        .filter(Boolean)
+        .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+        .join(' ');
+
+const truncateText = (value = '', max = 180) => {
+    const text = String(value || '').trim();
+    if (text.length <= max) return text;
+    return `${text.slice(0, max - 1).trimEnd()}…`;
+};
+
+const formatPercent = (value) => {
+    const parsed = parseNumeric(value);
+    if (parsed === null) return '—';
+    return `${Math.round(parsed * 100)}%`;
+};
+
+const getSentimentDescriptor = (score) => {
+    const parsed = parseNumeric(score);
+    if (parsed === null) {
+        return {
+            label: 'Unclear',
+            summary: 'Analyze more feedback to confirm how this customer feels.',
+            value: 'Awaiting analysis',
+            textClass: 'text-slate-700',
+            badgeClass: 'border-slate-200 bg-slate-50 text-slate-700',
+        };
+    }
+
+    if (parsed <= -0.25) {
+        return {
+            label: 'Negative',
+            summary: 'Recent feedback shows clear dissatisfaction and active friction.',
+            value: `${Math.abs(Math.round(parsed * 100))}% negative tilt`,
+            textClass: 'text-rose-700',
+            badgeClass: 'border-rose-200 bg-rose-50 text-rose-700',
+        };
+    }
+
+    if (parsed < 0.25) {
+        return {
+            label: 'Mixed',
+            summary: 'Signals are mixed, so this account may still be recoverable with a fast follow-up.',
+            value: 'Mixed sentiment',
+            textClass: 'text-amber-700',
+            badgeClass: 'border-amber-200 bg-amber-50 text-amber-700',
+        };
+    }
+
+    return {
+        label: 'Positive',
+        summary: 'This customer is generally satisfied, with isolated friction to resolve.',
+        value: `${Math.round(parsed * 100)}% positive tilt`,
+        textClass: 'text-emerald-700',
+        badgeClass: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+    };
+};
+
+const getRiskDescriptor = (probability) => {
+    const parsed = parseNumeric(probability);
+    if (parsed === null) {
+        return {
+            label: 'Unknown',
+            summary: 'Churn exposure will appear after enough analyzed feedback is available.',
+            badgeClass: 'border-slate-200 bg-slate-50 text-slate-700',
+            textClass: 'text-slate-700',
+        };
+    }
+
+    if (parsed >= 0.7) {
+        return {
+            label: 'High churn risk',
+            summary: 'This signal needs immediate recovery work before the account drifts further.',
+            badgeClass: 'border-rose-200 bg-rose-50 text-rose-700',
+            textClass: 'text-rose-700',
+        };
+    }
+
+    if (parsed >= 0.4) {
+        return {
+            label: 'Medium churn risk',
+            summary: 'This account is slipping and should be actively monitored.',
+            badgeClass: 'border-amber-200 bg-amber-50 text-amber-700',
+            textClass: 'text-amber-700',
+        };
+    }
+
+    return {
+        label: 'Low churn risk',
+        summary: 'Risk is contained, but resolving the root issue will protect long-term sentiment.',
+        badgeClass: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+        textClass: 'text-emerald-700',
+    };
+};
+
+const getRenewalStatus = (value) => {
+    if (!value) return null;
+
+    const renewalDate = new Date(value);
+    if (Number.isNaN(renewalDate.getTime())) return null;
+
+    const oneDayMs = 1000 * 60 * 60 * 24;
+    const diffDays = Math.ceil((renewalDate.getTime() - Date.now()) / oneDayMs);
+
+    if (diffDays > 1) return `Due in ${diffDays} days`;
+    if (diffDays === 1) return 'Due tomorrow';
+    if (diffDays === 0) return 'Due today';
+    if (diffDays === -1) return 'Renewal passed yesterday';
+    return `${Math.abs(diffDays)} days overdue`;
+};
+
+const inferOwningTeams = ({ issue, category, churnProbability }) => {
+    const source = `${issue || ''} ${category || ''}`.toLowerCase();
+    const teams = new Set();
+
+    if (/(billing|paywall|payment|subscription|invoice|renewal|entitlement)/.test(source)) {
+        teams.add('Product');
+        teams.add('Support');
+    }
+    if (/(support|ticket|reply|service|help|response)/.test(source)) {
+        teams.add('Support');
+    }
+    if (/(bug|crash|error|sync|login|auth|reliability|performance|slow|broken)/.test(source)) {
+        teams.add('Engineering');
+        teams.add('Product');
+    }
+    if (/(onboarding|setup|activation|trial|adoption|value|pricing|feature|ux|usability)/.test(source)) {
+        teams.add('Product');
+        teams.add('Growth');
+    }
+
+    if (!teams.size) {
+        teams.add(parseNumeric(churnProbability, 0) >= 0.7 ? 'Product' : 'Support');
+    }
+
+    return Array.from(teams).join(' + ');
+};
+
+const buildActionSuggestion = ({ issue, category, churnProbability, renewalStatus }) => {
+    const source = `${issue || ''} ${category || ''}`.toLowerCase();
+    const isUrgent = parseNumeric(churnProbability, 0) >= 0.7 || Boolean(renewalStatus && /today|tomorrow|due in/i.test(renewalStatus));
+
+    if (/(billing|paywall|payment|subscription|invoice|renewal|entitlement)/.test(source)) {
+        return {
+            title: 'Retention rescue draft',
+            description: 'Restore account access, verify billing state, send a make-good note, and escalate the entitlement fix before renewal.',
+            badge: isUrgent ? 'Urgent' : 'Priority',
+        };
+    }
+
+    if (/(support|ticket|reply|service|help|response)/.test(source)) {
+        return {
+            title: 'Support recovery plan',
+            description: 'Send a human follow-up, acknowledge the delay, and assign one owner to close the loop with a clear resolution.',
+            badge: isUrgent ? 'Urgent' : 'Follow up',
+        };
+    }
+
+    if (/(bug|crash|error|sync|login|auth|reliability|performance|slow|broken)/.test(source)) {
+        return {
+            title: 'Escalate product fix',
+            description: 'Capture the failing workflow, push the issue to engineering, and send a status note so the customer knows the bug is actively owned.',
+            badge: isUrgent ? 'Urgent' : 'Engineering',
+        };
+    }
+
+    if (/(onboarding|setup|activation|trial|adoption|ux|usability|feature|value|pricing)/.test(source)) {
+        return {
+            title: 'Adoption rescue plan',
+            description: 'Simplify the next step for the customer, give a guided path forward, and pair product messaging with a targeted success follow-up.',
+            badge: isUrgent ? 'Priority' : 'Adoption',
+        };
+    }
+
+    return {
+        title: 'Customer recovery brief',
+        description: 'Acknowledge the issue, assign a single owner, and deliver one concrete next step the customer can expect from the team.',
+        badge: isUrgent ? 'Priority' : 'Next step',
+    };
+};
+
+const buildSegmentSummary = (profiles = [], label = '') => {
+    if (!profiles.length) return null;
+
+    const analyzedProfiles = profiles.filter((item) => item.last_analyzed);
+    const avgSentiment = analyzedProfiles.length
+        ? analyzedProfiles.reduce((total, item) => total + (parseNumeric(item.latest_sentiment, 0) || 0), 0) / analyzedProfiles.length
+        : null;
+    const avgChurn = analyzedProfiles.length
+        ? analyzedProfiles.reduce((total, item) => total + (parseNumeric(item.latest_churn, 0) || 0), 0) / analyzedProfiles.length
+        : null;
+    const highRiskCount = profiles.filter((item) => parseNumeric(item.latest_churn, 0) >= 0.7).length;
+
+    const topIssues = {};
+    analyzedProfiles.forEach((item) => {
+        const key = cleanInsightLabel(item.latest_top_issue || '');
+        if (!key) return;
+        topIssues[key] = (topIssues[key] || 0) + 1;
+    });
+
+    const dominantIssue = Object.entries(topIssues)
+        .sort((left, right) => right[1] - left[1])[0]?.[0] || '';
+    const action = buildActionSuggestion({
+        issue: dominantIssue,
+        churnProbability: avgChurn,
+    });
+
+    return {
+        segmentLabel: label || profiles[0]?.segment || 'Selected segment',
+        totalProfiles: profiles.length,
+        analyzedProfiles: analyzedProfiles.length,
+        highRiskCount,
+        avgSentiment,
+        avgChurn,
+        dominantIssue,
+        sentiment: getSentimentDescriptor(avgSentiment),
+        risk: getRiskDescriptor(avgChurn),
+        action,
+        actionBrief: [
+            `Segment: ${label || profiles[0]?.segment || 'Selected segment'}`,
+            `Profiles in scope: ${profiles.length}`,
+            `Analyzed profiles: ${analyzedProfiles.length}`,
+            `High churn risk: ${highRiskCount}`,
+            dominantIssue ? `Dominant issue: ${titleCase(dominantIssue)}` : null,
+            `Recommended action: ${action.description}`,
+        ].filter(Boolean).join('\n'),
+    };
+};
+
+const buildCustomerPlaybook = ({ profile, detail, latestAnalysis, segmentProfiles, selectedSegment }) => {
+    const feedbacks = Array.isArray(detail?.feedbacks) ? detail.feedbacks.filter((item) => item.content) : [];
+    const analyzedFeedbacks = feedbacks.filter((item) =>
+        item.is_analyzed || item.issue || item.churn_risk || item.sentiment || item.sentiment_score !== null
+    );
+
+    if (!latestAnalysis && analyzedFeedbacks.length === 0) return null;
+
+    const sortedFeedbacks = [...(analyzedFeedbacks.length ? analyzedFeedbacks : feedbacks)].sort((left, right) => {
+        const leftRisk = left.churn_risk === 'high' ? 3 : left.churn_risk === 'medium' ? 2 : left.churn_risk === 'low' ? 1 : 0;
+        const rightRisk = right.churn_risk === 'high' ? 3 : right.churn_risk === 'medium' ? 2 : right.churn_risk === 'low' ? 1 : 0;
+        if (leftRisk !== rightRisk) return rightRisk - leftRisk;
+
+        const leftSentiment = parseNumeric(left.sentiment_score, 0);
+        const rightSentiment = parseNumeric(right.sentiment_score, 0);
+        if (leftSentiment !== rightSentiment) return leftSentiment - rightSentiment;
+
+        return String(right.feedback_date || right.created_at || '').localeCompare(String(left.feedback_date || left.created_at || ''));
+    });
+
+    const focusFeedback = sortedFeedbacks[0] || null;
+    const focusIssue = cleanInsightLabel(
+        focusFeedback?.issue ||
+        latestAnalysis?.top_issue ||
+        focusFeedback?.pain_point_category ||
+        'Customer friction'
+    );
+    const riskProbability = parseNumeric(
+        latestAnalysis?.churn_probability,
+        focusFeedback?.churn_risk === 'high' ? 0.85 : focusFeedback?.churn_risk === 'medium' ? 0.55 : focusFeedback?.churn_risk === 'low' ? 0.2 : null
+    );
+    const renewalStatus = getRenewalStatus(profile?.next_renewal);
+    const categoryLabel = titleCase(focusFeedback?.pain_point_category || '');
+    const action = buildActionSuggestion({
+        issue: focusIssue,
+        category: categoryLabel,
+        churnProbability: riskProbability,
+        renewalStatus,
+    });
+    const sentiment = getSentimentDescriptor(
+        parseNumeric(latestAnalysis?.avg_sentiment, parseNumeric(focusFeedback?.sentiment_score))
+    );
+    const risk = getRiskDescriptor(riskProbability);
+    const owningTeams = inferOwningTeams({
+        issue: focusIssue,
+        category: categoryLabel,
+        churnProbability: riskProbability,
+    });
+
+    const scopedSegment = selectedSegment || profile?.segment || '';
+    const peerProfiles = Array.isArray(segmentProfiles)
+        ? segmentProfiles.filter((item) => !scopedSegment || item.segment === scopedSegment)
+        : [];
+    const segmentContext = peerProfiles.length > 1 ? buildSegmentSummary(peerProfiles, scopedSegment || profile?.segment) : null;
+
+    const problemText = focusIssue
+        ? `The customer keeps reporting ${focusIssue.toLowerCase()}.`
+        : 'This account is showing repeat friction across recent feedback.';
+
+    let impactText = risk.summary;
+    if (renewalStatus) {
+        impactText = `${renewalStatus}. ${risk.summary}`;
+    } else if (profile?.plan) {
+        impactText = `${profile.plan} plan account. ${risk.summary}`;
+    }
+
+    return {
+        reviewTitle: titleCase(focusIssue || 'Customer signal'),
+        reviewBadges: [
+            focusFeedback?.source ? titleCase(focusFeedback.source) : null,
+            profile?.plan || null,
+            profile?.segment || null,
+            focusFeedback?.score ? `${focusFeedback.score}-star` : null,
+        ].filter(Boolean),
+        customerLabel: profile?.name || 'Selected customer',
+        customerMeta: [profile?.company || null, renewalStatus || null].filter(Boolean).join(' · '),
+        quote: truncateText(focusFeedback?.content || latestAnalysis?.summary || 'No analyzed feedback is available yet.', 220),
+        sentiment,
+        risk,
+        owningTeams,
+        action,
+        problemTitle: titleCase(focusIssue || categoryLabel || 'Root issue'),
+        problemText,
+        impactText,
+        actionBrief: [
+            `Customer: ${profile?.name || 'Selected customer'}`,
+            profile?.segment ? `Segment: ${profile.segment}` : null,
+            profile?.plan ? `Plan: ${profile.plan}` : null,
+            renewalStatus ? `Renewal: ${renewalStatus}` : null,
+            `Primary sentiment: ${sentiment.label}`,
+            `Business risk: ${risk.label}`,
+            `Owning teams: ${owningTeams}`,
+            `Main problem: ${titleCase(focusIssue || categoryLabel || 'Root issue')}`,
+            `Recommended action: ${action.description}`,
+        ].filter(Boolean).join('\n'),
+        segmentContext,
+    };
+};
+
 function parseCSVText(text) {
     const lines = text.trim().split('\n');
     if (lines.length < 2) return [];
@@ -281,7 +622,7 @@ const ImportCSVModal = ({ userId, workspaceId, onClose, onImported }) => {
 };
 
 // ─── Profile Detail Drawer ────────────────────────────────────────────────────
-const ProfileDrawer = ({ profile, userId, vertical, onClose, onUpdated }) => {
+const ProfileDrawer = ({ profile, userId, vertical, segmentProfiles = [], selectedSegment = '', onClose, onUpdated, onCopyAction }) => {
     const [detail, setDetail] = useState(null);
     const [loading, setLoading] = useState(true);
     const [analyzing, setAnalyzing] = useState(false);
@@ -347,8 +688,17 @@ const ProfileDrawer = ({ profile, userId, vertical, onClose, onUpdated }) => {
         churn: h.churn_probability !== null && h.churn_probability !== undefined ? Math.round(h.churn_probability * 100) : null,
     }));
 
+    const profileMeta = detail?.profile || profile;
     const latestAnalysis = detail?.history?.[0];
-    const churnInfo = churnColor(latestAnalysis?.churn_probability);
+    const analysisSnapshot = analyzeResult?.success ? { ...latestAnalysis, ...analyzeResult } : latestAnalysis;
+    const churnInfo = churnColor(analysisSnapshot?.churn_probability);
+    const playbook = buildCustomerPlaybook({
+        profile: profileMeta,
+        detail,
+        latestAnalysis: analysisSnapshot,
+        segmentProfiles,
+        selectedSegment,
+    });
 
     const tabs = [
         { id: 'overview', label: 'Overview', icon: Activity },
@@ -359,17 +709,17 @@ const ProfileDrawer = ({ profile, userId, vertical, onClose, onUpdated }) => {
     return (
         <>
             <div className="fixed inset-0 z-40 bg-black/20 backdrop-blur-sm" onClick={onClose} />
-            <div className="fixed right-0 top-0 bottom-0 z-50 w-full max-w-xl bg-white shadow-2xl shadow-indigo-900/20 flex flex-col overflow-hidden">
+            <div className="fixed right-0 top-0 bottom-0 z-50 w-full max-w-[1180px] bg-white shadow-2xl shadow-indigo-900/20 flex flex-col overflow-hidden">
                 {/* Header */}
                 <div className="px-6 py-5 bg-gradient-to-br from-slate-900 to-indigo-950 text-white flex items-start justify-between flex-shrink-0">
                     <div className="flex items-center gap-4">
                         <div className="w-12 h-12 rounded-xl bg-white/10 flex items-center justify-center text-xl font-bold border border-white/20">
-                            {(profile.name || '?')[0].toUpperCase()}
+                            {(profileMeta.name || '?')[0].toUpperCase()}
                         </div>
                         <div>
-                            <h2 className="text-lg font-bold leading-tight">{profile.name}</h2>
-                            <p className="text-slate-300 text-xs mt-0.5">{profile.email || '—'}</p>
-                            {profile.company && <p className="text-indigo-300 text-xs mt-0.5">{profile.company}</p>}
+                            <h2 className="text-lg font-bold leading-tight">{profileMeta.name}</h2>
+                            <p className="text-slate-300 text-xs mt-0.5">{profileMeta.email || '—'}</p>
+                            {profileMeta.company && <p className="text-indigo-300 text-xs mt-0.5">{profileMeta.company}</p>}
                         </div>
                     </div>
                     <button onClick={onClose} className="p-2 rounded-lg hover:bg-white/10 text-white/60 hover:text-white transition-colors mt-0.5">
@@ -380,9 +730,9 @@ const ProfileDrawer = ({ profile, userId, vertical, onClose, onUpdated }) => {
                 {/* Stats Strip */}
                 <div className="grid grid-cols-3 divide-x divide-gray-100 bg-gray-50/80 border-b border-gray-100 flex-shrink-0">
                     {[
-                        { label: 'Plan', value: profile.plan || '—', icon: CreditCard },
-                        { label: 'MRR', value: profile.mrr ? `$${Number(profile.mrr || 0).toLocaleString()}` : '—', icon: TrendingUp },
-                        { label: 'Segment', value: profile.segment || 'Unknown', icon: Tag },
+                        { label: 'Plan', value: profileMeta.plan || '—', icon: CreditCard },
+                        { label: 'MRR', value: profileMeta.mrr ? `$${Number(profileMeta.mrr || 0).toLocaleString()}` : '—', icon: TrendingUp },
+                        { label: 'Segment', value: profileMeta.segment || 'Unknown', icon: Tag },
                     ].map(s => (
                         <div key={s.label} className="px-4 py-3 text-center">
                             <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">{s.label}</p>
@@ -416,34 +766,34 @@ const ProfileDrawer = ({ profile, userId, vertical, onClose, onUpdated }) => {
                             {activeTab === 'overview' && (
                                 <div className="p-5 space-y-4">
                                     {/* Latest Analysis Card */}
-                                    {latestAnalysis ? (
+                                    {analysisSnapshot ? (
                                         <div className="bg-gradient-to-br from-indigo-50 to-violet-50 border border-indigo-100 rounded-xl p-4 space-y-3">
                                             <div className="flex items-center justify-between">
                                                 <h4 className="text-xs font-bold text-indigo-700 uppercase tracking-wider">Latest Analysis</h4>
-                                                <span className="text-[10px] text-gray-400">{new Date(latestAnalysis.run_at).toLocaleDateString()}</span>
+                                                <span className="text-[10px] text-gray-400">{analysisSnapshot.run_at ? new Date(analysisSnapshot.run_at).toLocaleDateString() : 'Just now'}</span>
                                             </div>
                                             <div className="grid grid-cols-2 gap-3">
                                                 <div className="bg-white rounded-lg p-3 text-center shadow-sm">
                                                     <p className="text-[10px] text-gray-500 uppercase tracking-wide font-bold">Sentiment</p>
-                                                    <p className={`text-xl font-black mt-1 ${sentimentColor(latestAnalysis.avg_sentiment)}`}>
-                                                        {latestAnalysis.avg_sentiment !== null ? `${Math.round(latestAnalysis.avg_sentiment * 100)}%` : '—'}
+                                                    <p className={`text-xl font-black mt-1 ${sentimentColor(analysisSnapshot.avg_sentiment)}`}>
+                                                        {analysisSnapshot.avg_sentiment !== null ? `${Math.round(analysisSnapshot.avg_sentiment * 100)}%` : '—'}
                                                     </p>
                                                 </div>
                                                 <div className="bg-white rounded-lg p-3 text-center shadow-sm">
                                                     <p className="text-[10px] text-gray-500 uppercase tracking-wide font-bold">Churn Risk</p>
                                                     <p className={`text-sm font-black mt-1 ${churnInfo.text}`}>{churnInfo.label}</p>
-                                                    {latestAnalysis.churn_probability !== null && (
-                                                        <p className="text-[10px] text-gray-400">{Math.round(latestAnalysis.churn_probability * 100)}%</p>
+                                                    {analysisSnapshot.churn_probability !== null && (
+                                                        <p className="text-[10px] text-gray-400">{Math.round(analysisSnapshot.churn_probability * 100)}%</p>
                                                     )}
                                                 </div>
                                             </div>
-                                            {latestAnalysis.top_issue && (
+                                            {analysisSnapshot.top_issue && (
                                                 <div className="bg-white rounded-lg px-3 py-2 text-xs text-gray-700 shadow-sm">
-                                                    <span className="font-semibold text-orange-600">Top Issue: </span>{latestAnalysis.top_issue}
+                                                    <span className="font-semibold text-orange-600">Top Issue: </span>{analysisSnapshot.top_issue}
                                                 </div>
                                             )}
-                                            {latestAnalysis.summary && (
-                                                <p className="text-xs text-gray-600 leading-relaxed">{latestAnalysis.summary}</p>
+                                            {analysisSnapshot.summary && (
+                                                <p className="text-xs text-gray-600 leading-relaxed">{analysisSnapshot.summary}</p>
                                             )}
                                         </div>
                                     ) : (
@@ -454,21 +804,162 @@ const ProfileDrawer = ({ profile, userId, vertical, onClose, onUpdated }) => {
                                         </div>
                                     )}
 
-                                    {analyzeResult && (
+                                    {analyzeResult?.success === false && (
+                                        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 flex items-start gap-2">
+                                            <AlertTriangle size={15} className="text-amber-500 mt-0.5 flex-shrink-0" />
+                                            <p className="text-xs text-amber-800">{analyzeResult.message || 'Analysis could not run for this customer yet.'}</p>
+                                        </div>
+                                    )}
+
+                                    {analyzeResult?.success && analyzeResult.summary && (
                                         <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 flex items-start gap-2">
                                             <CheckCircle2 size={15} className="text-emerald-500 mt-0.5 flex-shrink-0" />
                                             <p className="text-xs text-emerald-800">{analyzeResult.summary}</p>
                                         </div>
                                     )}
 
+                                    {playbook && (
+                                        <section className="rounded-[28px] border border-slate-200 bg-[linear-gradient(180deg,#ffffff,#f8fbff)] p-4 shadow-sm">
+                                            <div className="flex flex-wrap items-start justify-between gap-3">
+                                                <div>
+                                                    <span className="inline-flex items-center gap-2 rounded-full border border-cyan-200 bg-cyan-50 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-cyan-700">
+                                                        <Sparkles size={12} />
+                                                        Simple Flow
+                                                    </span>
+                                                    <p className="mt-3 text-sm text-slate-600">
+                                                        Review to sentiment to root problem, with a quick action plan at the end.
+                                                    </p>
+                                                </div>
+                                                {onCopyAction && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => onCopyAction(playbook.actionBrief, `${playbook.customerLabel} action brief copied.`)}
+                                                        className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50"
+                                                    >
+                                                        <Copy size={13} />
+                                                        Copy action brief
+                                                    </button>
+                                                )}
+                                            </div>
+
+                                            <div className="mt-4 grid gap-4 xl:grid-cols-3">
+                                                <article className="rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm">
+                                                    <div className="flex items-center justify-between gap-3">
+                                                        <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-cyan-700">Review</p>
+                                                        <span className={`rounded-full border px-3 py-1 text-[10px] font-bold uppercase tracking-[0.14em] ${playbook.risk.badgeClass}`}>
+                                                            {playbook.risk.label}
+                                                        </span>
+                                                    </div>
+                                                    <h4 className="mt-4 text-2xl font-black leading-tight text-slate-950">{playbook.reviewTitle}</h4>
+                                                    <div className="mt-4 flex flex-wrap gap-2">
+                                                        {playbook.reviewBadges.map((badge) => (
+                                                            <span key={badge} className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[10px] font-semibold text-slate-600">
+                                                                {badge}
+                                                            </span>
+                                                        ))}
+                                                    </div>
+                                                    <div className="mt-6 rounded-[20px] border border-slate-200 bg-slate-50 px-4 py-4">
+                                                        <p className="text-sm font-semibold text-slate-950">{playbook.customerLabel}</p>
+                                                        {playbook.customerMeta && <p className="mt-1 text-xs text-slate-500">{playbook.customerMeta}</p>}
+                                                        <p className="mt-3 text-sm leading-relaxed text-slate-700">"{playbook.quote}"</p>
+                                                    </div>
+                                                </article>
+
+                                                <article className="rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm">
+                                                    <div className="flex items-center justify-between gap-3">
+                                                        <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-rose-700">Sentiment</p>
+                                                        <span className={`rounded-full border px-3 py-1 text-[10px] font-bold uppercase tracking-[0.14em] ${playbook.risk.badgeClass}`}>
+                                                            {playbook.action.badge}
+                                                        </span>
+                                                    </div>
+                                                    <h4 className={`mt-4 text-4xl font-black leading-none ${playbook.sentiment.textClass}`}>{playbook.sentiment.label}</h4>
+                                                    <p className="mt-4 text-sm leading-relaxed text-slate-600">{playbook.sentiment.summary}</p>
+                                                    <div className="mt-6 space-y-3">
+                                                        {[
+                                                            ['Primary sentiment', playbook.sentiment.label],
+                                                            ['Business risk', playbook.risk.label],
+                                                            ['Owning teams', playbook.owningTeams],
+                                                        ].map(([label, value]) => (
+                                                            <div key={label} className="flex items-center justify-between gap-3 rounded-[18px] border border-slate-200 bg-slate-50 px-4 py-3">
+                                                                <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">{label}</p>
+                                                                <p className="text-xs font-semibold text-slate-700 text-right">{value}</p>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </article>
+
+                                                <article className="rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm">
+                                                    <div className="flex items-center justify-between gap-3">
+                                                        <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-amber-700">Main Problem</p>
+                                                        <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-amber-700">
+                                                            {playbook.action.badge}
+                                                        </span>
+                                                    </div>
+                                                    <h4 className="mt-4 text-2xl font-black leading-tight text-slate-950">{playbook.problemTitle}</h4>
+                                                    <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                                                        <div className="rounded-[18px] border border-slate-200 bg-slate-50 px-4 py-3">
+                                                            <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Problem</p>
+                                                            <p className="mt-2 text-sm leading-relaxed text-slate-700">{playbook.problemText}</p>
+                                                        </div>
+                                                        <div className="rounded-[18px] border border-slate-200 bg-slate-50 px-4 py-3">
+                                                            <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Impact</p>
+                                                            <p className="mt-2 text-sm leading-relaxed text-slate-700">{playbook.impactText}</p>
+                                                        </div>
+                                                    </div>
+                                                    <div className="mt-4 rounded-[20px] border border-cyan-100 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(236,250,255,0.9))] px-4 py-4">
+                                                        <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-cyan-700">Suggested Action</p>
+                                                        <p className="mt-2 text-base font-bold text-slate-950">{playbook.action.title}</p>
+                                                        <p className="mt-2 text-sm leading-relaxed text-slate-600">{playbook.action.description}</p>
+                                                    </div>
+                                                </article>
+                                            </div>
+
+                                            {playbook.segmentContext && (
+                                                <div className="mt-4 rounded-[24px] border border-slate-200 bg-slate-50 px-4 py-4">
+                                                    <div className="flex flex-wrap items-center justify-between gap-3">
+                                                        <div>
+                                                            <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Segment Context</p>
+                                                            <p className="mt-1 text-sm font-semibold text-slate-900 capitalize">
+                                                                {playbook.segmentContext.segmentLabel} has {playbook.segmentContext.totalProfiles} visible customers in this view.
+                                                            </p>
+                                                        </div>
+                                                        <span className={`rounded-full border px-3 py-1 text-[10px] font-bold uppercase tracking-[0.14em] ${playbook.segmentContext.risk.badgeClass}`}>
+                                                            {playbook.segmentContext.highRiskCount} high risk
+                                                        </span>
+                                                    </div>
+                                                    <div className="mt-3 grid gap-3 md:grid-cols-4">
+                                                        <div className="rounded-2xl border border-white bg-white px-3 py-3">
+                                                            <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Profiles</p>
+                                                            <p className="mt-2 text-lg font-black text-slate-900">{playbook.segmentContext.totalProfiles}</p>
+                                                        </div>
+                                                        <div className="rounded-2xl border border-white bg-white px-3 py-3">
+                                                            <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Analyzed</p>
+                                                            <p className="mt-2 text-lg font-black text-slate-900">{playbook.segmentContext.analyzedProfiles}</p>
+                                                        </div>
+                                                        <div className="rounded-2xl border border-white bg-white px-3 py-3">
+                                                            <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Avg churn</p>
+                                                            <p className="mt-2 text-lg font-black text-slate-900">{formatPercent(playbook.segmentContext.avgChurn)}</p>
+                                                        </div>
+                                                        <div className="rounded-2xl border border-white bg-white px-3 py-3">
+                                                            <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Top issue</p>
+                                                            <p className="mt-2 text-sm font-semibold leading-relaxed text-slate-900">
+                                                                {playbook.segmentContext.dominantIssue ? titleCase(playbook.segmentContext.dominantIssue) : 'No dominant issue yet'}
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </section>
+                                    )}
+
                                     {/* Profile Info */}
                                     <div className="bg-white border border-gray-100 rounded-xl p-4 space-y-2">
                                         <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Profile Info</h4>
                                         {[
-                                            { icon: Mail, label: 'Email', value: profile.email },
-                                            { icon: Building2, label: 'Company', value: profile.company },
-                                            { icon: Calendar, label: 'Joined', value: profile.joined_date },
-                                            { icon: Calendar, label: 'Renewal', value: profile.next_renewal },
+                                            { icon: Mail, label: 'Email', value: profileMeta.email },
+                                            { icon: Building2, label: 'Company', value: profileMeta.company },
+                                            { icon: Calendar, label: 'Joined', value: profileMeta.joined_date },
+                                            { icon: Calendar, label: 'Renewal', value: profileMeta.next_renewal },
                                         ].map(f => f.value && (
                                             <div key={f.label} className="flex items-center gap-3 text-sm">
                                                 <f.icon size={14} className="text-gray-400 flex-shrink-0" />
@@ -476,8 +967,8 @@ const ProfileDrawer = ({ profile, userId, vertical, onClose, onUpdated }) => {
                                                 <span className="text-gray-800 font-medium">{f.value}</span>
                                             </div>
                                         ))}
-                                        {profile.notes && (
-                                            <div className="pt-2 border-t border-gray-100 text-xs text-gray-600 leading-relaxed">{profile.notes}</div>
+                                        {profileMeta.notes && (
+                                            <div className="pt-2 border-t border-gray-100 text-xs text-gray-600 leading-relaxed">{profileMeta.notes}</div>
                                         )}
                                     </div>
                                 </div>
@@ -508,8 +999,8 @@ const ProfileDrawer = ({ profile, userId, vertical, onClose, onUpdated }) => {
                                                 </div>
                                                 <p className="text-sm text-gray-700 leading-relaxed">{fb.content}</p>
                                                 {fb.churn_risk && (
-                                                    <div className={`mt-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold ${churnColor(fb.churn_risk === 'High' ? 0.8 : fb.churn_risk === 'Medium' ? 0.5 : 0.1).bg} ${churnColor(fb.churn_risk === 'High' ? 0.8 : fb.churn_risk === 'Medium' ? 0.5 : 0.1).text}`}>
-                                                        {fb.churn_risk} Risk
+                                                    <div className={`mt-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold ${churnColor(String(fb.churn_risk).toLowerCase() === 'high' ? 0.8 : String(fb.churn_risk).toLowerCase() === 'medium' ? 0.5 : 0.1).bg} ${churnColor(String(fb.churn_risk).toLowerCase() === 'high' ? 0.8 : String(fb.churn_risk).toLowerCase() === 'medium' ? 0.5 : 0.1).text}`}>
+                                                        {titleCase(fb.churn_risk)} Risk
                                                     </div>
                                                 )}
                                                 {fb.issue && <p className="text-xs text-orange-600 mt-1">⚠ {fb.issue}</p>}
@@ -656,6 +1147,17 @@ const CustomerProfilesView = ({ user, activeWorkspace }) => {
         setTimeout(() => setToastMsg(null), 3000);
     };
 
+    const copyActionBrief = async (text, successMessage = 'Action brief copied') => {
+        if (!text) return;
+        try {
+            await navigator.clipboard.writeText(text);
+            showToast(successMessage);
+        } catch (e) {
+            console.error(e);
+            showToast('Could not copy action brief', 'error');
+        }
+    };
+
     const handleAddProfile = async (e) => {
         e.preventDefault();
         if (!addForm.name.trim()) return;
@@ -721,6 +1223,7 @@ const CustomerProfilesView = ({ user, activeWorkspace }) => {
     const totalMRR = profiles.reduce((s, p) => s + (p.mrr || 0), 0);
 
     const segments = [...new Set(profiles.map(p => p.segment).filter(Boolean))];
+    const activeSegmentSummary = segment ? buildSegmentSummary(profiles, segment) : null;
 
     return (
         <div className="flex-1 flex flex-col min-h-0 bg-gray-50 overflow-y-auto">
@@ -795,6 +1298,65 @@ const CustomerProfilesView = ({ user, activeWorkspace }) => {
                     ))}
                 </div>
             </div>
+
+            {activeSegmentSummary && (
+                <div className="px-6 pb-4 flex-shrink-0">
+                    <div className="rounded-[26px] border border-slate-200 bg-[linear-gradient(180deg,#ffffff,#f8fbff)] p-5 shadow-sm">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div>
+                                <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-cyan-700">Selected Segment</p>
+                                <h3 className="mt-2 text-lg font-black text-slate-950 capitalize">{activeSegmentSummary.segmentLabel} snapshot</h3>
+                                <p className="mt-2 text-sm text-slate-600">{activeSegmentSummary.sentiment.summary}</p>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-2">
+                                <span className={`rounded-full border px-3 py-1 text-[10px] font-bold uppercase tracking-[0.14em] ${activeSegmentSummary.risk.badgeClass}`}>
+                                    {activeSegmentSummary.highRiskCount} high risk
+                                </span>
+                                <button
+                                    type="button"
+                                    onClick={() => copyActionBrief(activeSegmentSummary.actionBrief, `${activeSegmentSummary.segmentLabel} segment brief copied.`)}
+                                    className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50"
+                                >
+                                    <Copy size={13} />
+                                    Copy segment brief
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setSegment('')}
+                                    className="rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50"
+                                >
+                                    Clear filter
+                                </button>
+                            </div>
+                        </div>
+
+                        <div className="mt-4 grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
+                            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                                {[
+                                    { label: 'Profiles', value: activeSegmentSummary.totalProfiles },
+                                    { label: 'Analyzed', value: activeSegmentSummary.analyzedProfiles },
+                                    { label: 'Avg Sentiment', value: formatPercent(activeSegmentSummary.avgSentiment) },
+                                    { label: 'Avg Churn', value: formatPercent(activeSegmentSummary.avgChurn) },
+                                ].map((item) => (
+                                    <div key={item.label} className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                                        <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">{item.label}</p>
+                                        <p className="mt-2 text-lg font-black text-slate-900">{item.value}</p>
+                                    </div>
+                                ))}
+                            </div>
+
+                            <div className="rounded-[22px] border border-cyan-100 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(236,250,255,0.92))] px-4 py-4">
+                                <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-cyan-700">Recommended action</p>
+                                <p className="mt-2 text-base font-bold text-slate-950">{activeSegmentSummary.action.title}</p>
+                                <p className="mt-2 text-sm leading-relaxed text-slate-600">{activeSegmentSummary.action.description}</p>
+                                <p className="mt-3 text-xs text-slate-500">
+                                    {activeSegmentSummary.dominantIssue ? `Dominant issue: ${titleCase(activeSegmentSummary.dominantIssue)}.` : 'A dominant issue will appear after more profiles are analyzed.'}
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Profile Table */}
             <div className="px-6 pb-6 flex-1">
@@ -976,8 +1538,11 @@ const CustomerProfilesView = ({ user, activeWorkspace }) => {
                     profile={selectedProfile}
                     userId={userId}
                     vertical={vertical}
+                    segmentProfiles={profiles}
+                    selectedSegment={segment}
                     onClose={() => setSelectedProfile(null)}
                     onUpdated={fetchProfiles}
+                    onCopyAction={copyActionBrief}
                 />
             )}
         </div>

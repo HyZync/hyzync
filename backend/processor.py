@@ -21,7 +21,11 @@ try:
     import json_repair
 except ImportError:
     pass
-from insight_prompts import build_record_analysis_prompt, infer_analysis_mode
+from insight_prompts import (
+    build_record_analysis_batch_prompt,
+    build_record_analysis_prompt,
+    infer_analysis_mode,
+)
 
 import pandas as pd
 import requests
@@ -68,13 +72,13 @@ BASELINE_WINDOW_DAYS = 60
 # --- Global HTTP Session (reused across all LLM calls) ---
 _session = requests.Session()
 _retry_strategy = Retry(
-    total=0,
-    connect=0,
+    total=2,
+    connect=2,
     read=0,
-    status=0,
+    status=1,
     other=0,
-    backoff_factor=0,
-    status_forcelist=[],
+    backoff_factor=0.5,
+    status_forcelist=[502, 503, 504],
     allowed_methods=["POST"],
 )
 _adapter = HTTPAdapter(max_retries=_retry_strategy, pool_connections=4, pool_maxsize=4)
@@ -183,6 +187,8 @@ _RE_ORPHAN_QUOTE_KEY = re.compile(r',\s*""\s*([a-zA-Z_][a-zA-Z0-9_]*)":')
 _RE_ORPHAN_QUOTE = re.compile(r',\s*""\s*,')
 _RE_MISSING_VALUE = re.compile(r':\s*,')
 _RE_MISSING_VALUE_END = re.compile(r':\s*\}')
+_RE_DOUBLE_COMMA = re.compile(r',\s*,+')
+_RE_CONTROL_CHARS = re.compile(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]')
 MIN_REVIEW_CHAR_LENGTH = 2
 
 # --- Context-Window Sliding Window Config ---
@@ -217,15 +223,27 @@ CONTEXT_HEADROOM = _safe_float(getattr(settings, "ANALYSIS_CONTEXT_HEADROOM", 0.
 CONTEXT_REFRESH_TOKENS = max(1024, int(CTX_WINDOW_TOKENS * CONTEXT_HEADROOM))
 
 PROMPT_OVERHEAD_TOKENS = 320       # Fixed per call: persona + rules + schema tokens
-OUTPUT_TOKENS_PER_REVIEW = 256     # Matches num_predict in query_ollama
+OUTPUT_TOKENS_PER_REVIEW = _safe_int(
+    getattr(settings, "ANALYSIS_OUTPUT_TOKENS_PER_REVIEW", 192),
+    192,
+    96,
+)
 TOKENS_PER_CHAR = 0.30             # ~3 chars per token for English text
-MAX_PROMPT_REVIEW_CHARS = 700      # Mirrors content truncation before prompt build
+MAX_PROMPT_REVIEW_CHARS = _safe_int(
+    getattr(settings, "ANALYSIS_MAX_PROMPT_REVIEW_CHARS", 520),
+    520,
+    200,
+)
 
 # Total token budget for a single review slot (prompt + content + output)
 _TOKENS_PER_SLOT = PROMPT_OVERHEAD_TOKENS + int(MAX_PROMPT_REVIEW_CHARS * TOKENS_PER_CHAR) + OUTPUT_TOKENS_PER_REVIEW
 # Estimated reviews that safely fit in one context-refresh cycle
 MAX_REVIEWS_PER_WINDOW = max(1, int(CONTEXT_REFRESH_TOKENS / max(_TOKENS_PER_SLOT, 1)))
-MAX_RETRY_PASSES = 2              # Retry failed reviews this many extra times
+MAX_RETRY_PASSES = _safe_int(
+    getattr(settings, "ANALYSIS_RETRY_PASSES", 1),
+    1,
+    0,
+)  # Retry failed reviews this many extra passes
 OLLAMA_REQUEST_TIMEOUT_SECONDS = _safe_int(
     getattr(settings, "OLLAMA_REQUEST_TIMEOUT_SECONDS", 90),
     90,
@@ -257,13 +275,13 @@ OLLAMA_PREFLIGHT_TIMEOUT_SECONDS = _safe_int(
 _ollama_url_lc = str(getattr(settings, "OLLAMA_URL", "") or "").lower()
 _llm_is_local = ("localhost" in _ollama_url_lc) or ("127.0.0.1" in _ollama_url_lc)
 LLM_MAX_CONCURRENCY = _safe_int(
-    getattr(settings, "LLM_MAX_CONCURRENCY", 8 if _llm_is_local else 3),
-    8 if _llm_is_local else 3,
+    getattr(settings, "LLM_MAX_CONCURRENCY", 8 if _llm_is_local else 1),
+    8 if _llm_is_local else 1,
     1,
 )
 LLM_WINDOW_MAX_WORKERS_REMOTE = _safe_int(
-    getattr(settings, "LLM_WINDOW_MAX_WORKERS_REMOTE", 3),
-    3,
+    getattr(settings, "LLM_WINDOW_MAX_WORKERS_REMOTE", 1),
+    1,
     1,
 )
 LLM_WINDOW_MAX_WORKERS_LOCAL = _safe_int(
@@ -271,6 +289,74 @@ LLM_WINDOW_MAX_WORKERS_LOCAL = _safe_int(
     4,
     1,
 )
+LLM_BATCHING_ENABLED = bool(getattr(settings, "LLM_BATCHING_ENABLED", True))
+LLM_BATCH_MAX_ITEMS = _safe_int(
+    getattr(settings, "LLM_BATCH_MAX_ITEMS", 4),
+    4,
+    1,
+)
+LLM_BATCH_MAX_WAIT_MS = _safe_int(
+    getattr(settings, "LLM_BATCH_MAX_WAIT_MS", 40),
+    40,
+    5,
+)
+LLM_BATCH_DISABLED_MODELS = [
+    token.strip().lower()
+    for token in str(getattr(settings, "LLM_BATCH_DISABLED_MODELS", "phi4-mini,phi4-free,phi-4-mini") or "").split(",")
+    if token and token.strip()
+]
+STRICT_LLM_ANALYSIS = bool(getattr(settings, "STRICT_LLM_ANALYSIS", True))
+STRICT_ANALYSIS_MAX_ATTEMPTS = _safe_int(
+    getattr(settings, "STRICT_ANALYSIS_MAX_ATTEMPTS", 5),
+    5,
+    1,
+)
+STRICT_ANALYSIS_FAIL_ON_UNRESOLVED = bool(
+    getattr(settings, "STRICT_ANALYSIS_FAIL_ON_UNRESOLVED", True)
+)
+
+
+def _resolve_analysis_llm_timeout_seconds(configured_timeout: Any, request_timeout_seconds: int, is_local: bool) -> int:
+    resolved = _safe_int(configured_timeout, request_timeout_seconds, 10)
+    if is_local:
+        return min(resolved, request_timeout_seconds)
+    return max(10, resolved)
+
+
+ANALYSIS_LLM_TIMEOUT_SECONDS = _resolve_analysis_llm_timeout_seconds(
+    getattr(settings, "ANALYSIS_LLM_TIMEOUT_SECONDS", OLLAMA_REQUEST_TIMEOUT_SECONDS),
+    OLLAMA_REQUEST_TIMEOUT_SECONDS,
+    _llm_is_local,
+)
+ANALYSIS_LLM_REQUEST_RETRIES = _safe_int(
+    getattr(
+        settings,
+        "ANALYSIS_LLM_REQUEST_RETRIES",
+        1 if not _llm_is_local else min(2, OLLAMA_REQUEST_RETRIES),
+    ),
+    1 if not _llm_is_local else min(2, OLLAMA_REQUEST_RETRIES),
+    1,
+)
+_analysis_batch_remote_max_items = _safe_int(
+    getattr(settings, "ANALYSIS_BATCH_MAX_ITEMS_REMOTE", 1),
+    1,
+    1,
+)
+ANALYSIS_BATCH_MAX_ITEMS = (
+    min(LLM_BATCH_MAX_ITEMS, _analysis_batch_remote_max_items)
+    if not _llm_is_local
+    else LLM_BATCH_MAX_ITEMS
+)
+ANALYSIS_BATCH_MAX_WAIT_MS = _safe_int(
+    getattr(settings, "ANALYSIS_BATCH_MAX_WAIT_MS", 30 if not _llm_is_local else LLM_BATCH_MAX_WAIT_MS),
+    30 if not _llm_is_local else LLM_BATCH_MAX_WAIT_MS,
+    5,
+)
+if not _llm_is_local:
+    WINDOW_IDLE_FALLBACK_SECONDS = min(
+        WINDOW_IDLE_FALLBACK_SECONDS,
+        max(90, ANALYSIS_LLM_TIMEOUT_SECONDS * 2),
+    )
 _llm_semaphore = threading.Semaphore(LLM_MAX_CONCURRENCY)
 _llm_health_cache_lock = threading.Lock()
 _llm_health_cache: Dict[str, Any] = {"expires_at": 0.0, "value": None}
@@ -663,59 +749,300 @@ def fix_unescaped_quotes(json_str: str) -> str:
                  fixed_chars.append('\\"') 
         else:
             fixed_chars.append(char)
-            
+             
     return "".join(fixed_chars)
+
+def _strip_markdown_fences(raw_response: str) -> str:
+    return _RE_MARKDOWN_FENCE.sub('', str(raw_response or '').strip())
+
+
+def _extract_balanced_json_chunk(candidate: str) -> str:
+    if not candidate:
+        return ""
+
+    pairs = {'{': '}', '[': ']'}
+    start_char = candidate[0]
+    expected_end = pairs.get(start_char)
+    if not expected_end:
+        return ""
+
+    stack = [expected_end]
+    in_string = False
+    escape_next = False
+
+    for idx, char in enumerate(candidate[1:], start=1):
+        if escape_next:
+            escape_next = False
+            continue
+
+        if char == '\\':
+            escape_next = True
+            continue
+
+        if char == '"':
+            in_string = not in_string
+            continue
+
+        if in_string:
+            continue
+
+        if char in pairs:
+            stack.append(pairs[char])
+            continue
+
+        if stack and char == stack[-1]:
+            stack.pop()
+            if not stack:
+                return candidate[:idx + 1]
+
+    return ""
+
+
+def _extract_structured_candidates(raw_response: str) -> List[str]:
+    raw_text = str(raw_response or '').strip()
+    stripped = _strip_markdown_fences(raw_text)
+    candidates: List[str] = []
+    seen = set()
+
+    def _push(value: str) -> None:
+        cleaned_value = str(value or '').strip()
+        if not cleaned_value or cleaned_value in seen:
+            return
+        seen.add(cleaned_value)
+        candidates.append(cleaned_value)
+
+    for seed in (stripped, raw_text):
+        if not seed:
+            continue
+
+        object_start = seed.find('{')
+        array_start = seed.find('[')
+        start_positions = [idx for idx in (object_start, array_start) if idx != -1]
+        if not start_positions:
+            _push(seed)
+            continue
+
+        start_idx = min(start_positions)
+        fragment = seed[start_idx:]
+        _push(fragment)
+
+        balanced = _extract_balanced_json_chunk(fragment)
+        if balanced:
+            _push(balanced)
+        else:
+            end_char = '}' if seed[start_idx] == '{' else ']'
+            search_end = min(len(seed), start_idx + 20000)
+            fallback_end = seed.rfind(end_char, start_idx, search_end)
+            if fallback_end != -1 and fallback_end >= start_idx:
+                _push(seed[start_idx:fallback_end + 1])
+
+        _push(seed)
+
+    return candidates
+
+
+def _json_candidate_variants(candidate: str) -> List[str]:
+    base = str(candidate or '').strip().lstrip('\ufeff')
+    if not base:
+        return []
+
+    variants: List[str] = []
+    seen = set()
+
+    def _push(value: str) -> None:
+        cleaned_value = str(value or '').strip()
+        if not cleaned_value or cleaned_value in seen:
+            return
+        seen.add(cleaned_value)
+        variants.append(cleaned_value)
+
+    _push(base)
+
+    cleaned = base.replace('\udfe7', '').strip()
+    cleaned = _RE_CONTROL_CHARS.sub(' ', cleaned)
+    cleaned = cleaned.replace('\r', ' ').replace('\n', ' ')
+    cleaned = _RE_INVALID_ESCAPE.sub('', cleaned)
+    cleaned = _RE_UNQUOTED_KEY.sub(r',"\1":', cleaned)
+    cleaned = _RE_TRAILING_COMMA_OBJ.sub('}', cleaned)
+    cleaned = _RE_TRAILING_COMMA_ARR.sub(']', cleaned)
+    cleaned = _RE_ORPHAN_QUOTE_KEY.sub(r',"\1":', cleaned)
+    cleaned = _RE_ORPHAN_QUOTE.sub(',', cleaned)
+    cleaned = _RE_MISSING_VALUE.sub(':"None",', cleaned)
+    cleaned = _RE_MISSING_VALUE_END.sub(':"None"}', cleaned)
+    cleaned = _RE_DOUBLE_COMMA.sub(',', cleaned)
+    _push(cleaned)
+
+    quote_fixed = fix_unescaped_quotes(cleaned)
+    _push(quote_fixed)
+
+    return variants
+
+
+def _unwrap_nested_json_payload(value: Any, max_depth: int = 2) -> Any:
+    current = value
+    for _ in range(max_depth):
+        if not isinstance(current, str):
+            break
+        inner = _strip_markdown_fences(current).strip()
+        if not inner or inner == current and not inner.startswith(('{', '[', '"')):
+            break
+        try:
+            current = json.loads(inner)
+        except Exception:
+            break
+    return current
+
+
+def _decode_json_candidate(candidate: str) -> Any:
+    last_error = None
+    variants = _json_candidate_variants(candidate)
+
+    for variant in variants:
+        try:
+            decoded = _unwrap_nested_json_payload(json.loads(variant))
+            if isinstance(decoded, (dict, list)):
+                return decoded
+        except Exception as exc:
+            last_error = exc
+
+    for variant in variants:
+        try:
+            if 'json_repair' in globals():
+                decoded = _unwrap_nested_json_payload(json_repair.loads(variant))
+                if isinstance(decoded, (dict, list)):
+                    return decoded
+        except Exception as exc:
+            last_error = exc
+
+    for variant in variants:
+        try:
+            decoded = _unwrap_nested_json_payload(ast.literal_eval(variant))
+            if isinstance(decoded, (dict, list)):
+                return decoded
+        except Exception as exc:
+            last_error = exc
+
+    if last_error:
+        raise last_error
+    raise ValueError("No decodable JSON candidate found")
+
+
+def parse_llm_json_payload(response: str) -> Any:
+    """Robustly extracts, cleans, and parses JSON payloads from LLM responses."""
+    if not response or not str(response).strip():
+        raise ValueError("Empty response from LLM")
+
+    raw_response = str(response).strip()
+    parse_errors: List[str] = []
+
+    for candidate in _extract_structured_candidates(raw_response):
+        try:
+            decoded = _decode_json_candidate(candidate)
+            if isinstance(decoded, (dict, list)):
+                return decoded
+        except Exception as exc:
+            parse_errors.append(str(exc))
+
+    hint = parse_errors[-1] if parse_errors else "unknown parsing error"
+    raise ValueError(
+        f"Failed to parse JSON even after robust cleanup ({hint}). Snippet: {raw_response[:100]}..."
+    )
+
 
 def parse_llm_json(response: str) -> dict:
     """Robustly extracts, cleans, and parses JSON objects from LLM responses."""
-    if not response or not str(response).strip():
-        raise ValueError("Empty response from LLM")
-        
-    raw_response = str(response).strip()
-    
-    # Remove markdown code blocks
-    raw_response = _RE_MARKDOWN_FENCE.sub('', raw_response)
-    
-    # 1. Fast path: try standard JSON
-    try:
-        start_idx = raw_response.find('{')
-        end_idx = raw_response.rfind('}')
-        if start_idx != -1 and end_idx != -1 and end_idx >= start_idx:
-            chunk = raw_response[start_idx:end_idx+1]
-            res = json.loads(chunk)
-            if isinstance(res, dict):
-                return res
-    except Exception:
-        pass
-        
-    # 2. Robust path: Use json_repair (specifically designed for LLM output)
-    try:
-        if 'json_repair' in globals():
-            decoded = json_repair.loads(raw_response)
-            # json_repair can sometimes return strings if it fails completely
-            if isinstance(decoded, dict) or isinstance(decoded, list):
-                return decoded
-            # if it's a string, maybe it's nested or stringified
-            if isinstance(decoded, str):
-                inner = json.loads(decoded)
-                if isinstance(inner, dict): return inner
-    except Exception as e:
-        log_debug(f"json_repair failed: {e}")
-        
-    # 3. Fallback path: ast.literal_eval in case LLM outputted a Python dictionary
-    try:
-        start_idx = raw_response.find('{')
-        end_idx = raw_response.rfind('}')
-        if start_idx != -1 and end_idx != -1 and end_idx >= start_idx:
-            chunk = raw_response[start_idx:end_idx+1]
-            res = ast.literal_eval(chunk)
-            if isinstance(res, dict):
-                return res
-    except Exception:
-        pass
-        
-    # If all robust methods fail, throw ValueError so the rule_based_fallback_analysis catches it
-    raise ValueError(f"Failed to parse JSON even after robust cleanup. Snippet: {raw_response[:100]}...")
+    payload = parse_llm_json_payload(response)
+    if isinstance(payload, dict):
+        return payload
+    raise ValueError("Parsed JSON payload was not an object")
+
+
+def parse_llm_batch_json(response: str) -> Dict[str, Dict[str, Any]]:
+    """Parse a batched JSON payload and index it by request_id."""
+    payload = parse_llm_json_payload(response)
+
+    def _normalize_batch_item(item: Any, fallback_request_id: str = "") -> Optional[Dict[str, Any]]:
+        if not isinstance(item, dict):
+            return None
+
+        normalized = dict(item)
+        for nested_key in ("result", "analysis", "payload", "data"):
+            nested = normalized.get(nested_key)
+            if isinstance(nested, dict):
+                merged = dict(nested)
+                for passthrough_key in ("request_id", "requestId", "review_id", "reviewId"):
+                    passthrough_value = normalized.get(passthrough_key)
+                    if passthrough_value and not merged.get(passthrough_key):
+                        merged[passthrough_key] = passthrough_value
+                normalized = merged
+                break
+
+        request_id = str(
+            normalized.get("request_id")
+            or normalized.get("requestId")
+            or fallback_request_id
+            or ""
+        ).strip()
+        if not request_id:
+            return None
+
+        normalized["request_id"] = request_id
+        return normalized
+
+    if isinstance(payload, list):
+        items = payload
+    elif isinstance(payload, dict):
+        items = None
+        if isinstance(payload.get("results"), list):
+            items = payload.get("results")
+        elif isinstance(payload.get("results"), dict):
+            items = [
+                _normalize_batch_item(value, fallback_request_id=str(key))
+                for key, value in payload.get("results", {}).items()
+            ]
+        elif isinstance(payload.get("items"), list):
+            items = payload.get("items")
+        elif isinstance(payload.get("items"), dict):
+            items = [
+                _normalize_batch_item(value, fallback_request_id=str(key))
+                for key, value in payload.get("items", {}).items()
+            ]
+        elif isinstance(payload.get("data"), list):
+            items = payload.get("data")
+        elif isinstance(payload.get("data"), dict):
+            items = [
+                _normalize_batch_item(value, fallback_request_id=str(key))
+                for key, value in payload.get("data", {}).items()
+            ]
+        if items is None and str(payload.get("request_id", "")).strip():
+            items = [payload]
+        if items is None and payload and all(isinstance(value, dict) for value in payload.values()):
+            items = [
+                _normalize_batch_item(value, fallback_request_id=str(key))
+                for key, value in payload.items()
+            ]
+    else:
+        items = None
+
+    if not isinstance(items, list):
+        raise ValueError("Batch response did not contain a results array")
+
+    indexed: Dict[str, Dict[str, Any]] = {}
+    for item in items:
+        normalized = _normalize_batch_item(item)
+        if not isinstance(normalized, dict):
+            continue
+        request_id = str(normalized.get("request_id", "")).strip()
+        if not request_id:
+            continue
+        if request_id in indexed:
+            raise ValueError(f"Duplicate request_id returned in batch response: {request_id}")
+        indexed[request_id] = normalized
+
+    if not indexed:
+        raise ValueError("Batch response contained no request_id-indexed objects")
+
+    return indexed
 
 # Domain Configuration (Matched with W4.py)
 # Load Prompts Data
@@ -771,6 +1098,8 @@ REVIEW_ANALYSIS_SCHEMA = {
         "sentiment": {"type": "string", "enum": ["positive", "negative", "neutral"]},
         "sentiment_score": {"type": "number", "minimum": -1.0, "maximum": 1.0},
         "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+        "action_confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+        "impact_score": {"type": "number", "minimum": 0.0, "maximum": 100.0},
         "churn_risk": {"type": "string", "enum": ["high", "medium", "low", "null"]},
         "churn_impact": {"type": "string", "enum": ["high", "medium", "low", "none"]},
         "pain_point_category": {"type": "string", "enum": ["Billing", "Feature", "UX", "Bug", "Support", "Other", "Value"]},
@@ -800,6 +1129,8 @@ DEFAULT_VALUES = {
     "sentiment": "neutral",
     "sentiment_score": 0.0,
     "confidence": 0.5,
+    "action_confidence": 0.5,
+    "impact_score": 0.0,
     "churn_risk": "null",
     "churn_impact": "none",
     "pain_point_category": "Other",
@@ -823,6 +1154,40 @@ DEFAULT_VALUES = {
     "domain_insight": "N/A",
     "revenue_sensitivity": False
 }
+
+
+def _build_unresolved_result(
+    review_data: Dict[str, Any],
+    *,
+    reason: str,
+    raw_content: str = "",
+    error_detail: str = "",
+    noise_score: float = 0.0,
+    clean_flags: Optional[List[str]] = None,
+    cleaned_text: str = "",
+    clean_token_estimate: int = 0,
+    tokens: int = 0,
+    batched: bool = False,
+    batch_size: int = 1,
+) -> Dict[str, Any]:
+    payload = {
+        **review_data,
+        **DEFAULT_VALUES.copy(),
+        "_meta_tokens": int(tokens or 0),
+        "_meta_error": True,
+        "_meta_fallback": False,
+        "_meta_reason": str(reason or "llm_unresolved"),
+        "_meta_raw_content": str(raw_content or review_data.get("content") or ""),
+        "_noise_score": float(noise_score or 0.0),
+        "_clean_flags": list(clean_flags or []),
+        "_cleaned_text": str(cleaned_text or ""),
+        "_clean_token_estimate": int(clean_token_estimate or 0),
+        "_meta_batched": bool(batched),
+        "_meta_batch_size": int(batch_size or 1),
+    }
+    if error_detail:
+        payload["_meta_error_detail"] = str(error_detail)[:600]
+    return payload
 
 # --- Utility Functions ---
 
@@ -904,18 +1269,37 @@ _CRM_SIGNATURE_LINE = re.compile(r'^\s*(thanks|thank you|best regards|kind regar
 _CRM_REFERENCE_TOKEN = re.compile(r'\b(ticket|case|conversation|thread|incident|reference)\s*[#: -]*[a-z0-9\-]{4,}\b', re.IGNORECASE)
 _HEX_LIKE_NOISE = re.compile(r'\b[a-f0-9]{16,}\b', re.IGNORECASE)
 
-# Deduplication registry (module-level, cleared per batch)
-_dedup_fingerprints: set = set()
+class DedupRegistry:
+    """Thread-safe per-batch duplicate tracker."""
 
-def _reset_dedup_cache():
-    """Call once at the start of each analysis batch to prevent cross-batch dedup."""
-    global _dedup_fingerprints
-    _dedup_fingerprints = set()
+    def __init__(self):
+        self._fingerprints: set[str] = set()
+        self._lock = threading.Lock()
+
+    def check_and_register(self, fingerprint: str) -> bool:
+        with self._lock:
+            if fingerprint in self._fingerprints:
+                return True
+            self._fingerprints.add(fingerprint)
+            return False
+
+
+def create_dedup_registry() -> DedupRegistry:
+    return DedupRegistry()
 
 def _content_fingerprint(text: str) -> str:
     """SHA-1 fingerprint of first 80 lowercased alphanum chars for near-dupe detection."""
     normalized = re.sub(r'[^a-z0-9]', '', text.lower())[:80]
     return hashlib.sha1(normalized.encode()).hexdigest()
+
+
+def _check_duplicate_with_registry(text: str, dedup_registry: Any) -> bool:
+    if not dedup_registry or not text:
+        return False
+    try:
+        return bool(dedup_registry.check_and_register(_content_fingerprint(text)))
+    except Exception:
+        return False
 
 def _estimate_tokens(text: str) -> int:
     """Fast token estimate: average 3 chars per English token."""
@@ -1066,12 +1450,10 @@ def advanced_clean_review(
 
     # ── Step 7: Deduplication fingerprint check ───────────────────────
     if token_efficiency and cleaned:
-        fp = _content_fingerprint(cleaned)
-        if fp in _dedup_fingerprints:
+        dedup_registry = options.get('dedup_registry')
+        if _check_duplicate_with_registry(cleaned, dedup_registry):
             was_duplicate = True
             flags.append('duplicate')
-        else:
-            _dedup_fingerprints.add(fp)
 
     # ── Step 8: Magic cleaning — noise scoring ────────────────────────
     if magic_clean and cleaned:
@@ -1166,6 +1548,12 @@ def validate_and_repair_json(obj):
             elif field == "confidence":
                 if not isinstance(obj[field], (int, float)) or obj[field] < 0.0 or obj[field] > 1.0:
                     obj[field] = default
+            elif field == "action_confidence":
+                if not isinstance(obj[field], (int, float)) or obj[field] < 0.0 or obj[field] > 1.0:
+                    obj[field] = default
+            elif field == "impact_score":
+                if not isinstance(obj[field], (int, float)) or obj[field] < 0.0 or obj[field] > 100.0:
+                    obj[field] = default
             elif field in string_fields:
                 if isinstance(obj[field], (list, dict)):
                     obj[field] = default
@@ -1199,16 +1587,34 @@ def query_ollama(
     system_prompt=None,
     temperature=0.05,
     top_p=0.9,
+    timeout_seconds=None,
+    retries=None,
+    num_ctx=None,
 ):
     effective_model = model or settings.OLLAMA_MODEL
+    effective_timeout = _safe_int(
+        timeout_seconds if timeout_seconds is not None else OLLAMA_REQUEST_TIMEOUT_SECONDS,
+        OLLAMA_REQUEST_TIMEOUT_SECONDS,
+        5,
+    )
+    effective_retries = _safe_int(
+        retries if retries is not None else OLLAMA_REQUEST_RETRIES,
+        OLLAMA_REQUEST_RETRIES,
+        1,
+    )
+    effective_num_ctx = _safe_int(
+        num_ctx if num_ctx is not None else _effective_num_ctx(prompt, num_predict),
+        _effective_num_ctx(prompt, num_predict),
+        1024,
+    )
     result = llm_gateway.request_completion(
         prompt,
         model=effective_model,
         num_predict=num_predict,
         response_format=response_format,
-        timeout_seconds=OLLAMA_REQUEST_TIMEOUT_SECONDS,
-        retries=OLLAMA_REQUEST_RETRIES,
-        num_ctx=_effective_num_ctx(prompt, num_predict),
+        timeout_seconds=effective_timeout,
+        retries=effective_retries,
+        num_ctx=effective_num_ctx,
         stop_event=stop_event,
         system_prompt=system_prompt,
         temperature=temperature,
@@ -1232,6 +1638,376 @@ def check_llm_connectivity(timeout_seconds: Optional[int] = None, force_refresh:
         model=settings.OLLAMA_MODEL,
         num_ctx=_effective_num_ctx('Return only valid JSON: {"ok": true, "probe": "analysis"}', 64),
     )
+
+
+def _should_use_review_batching() -> bool:
+    if not (LLM_BATCHING_ENABLED and ANALYSIS_BATCH_MAX_ITEMS > 1):
+        return False
+    model_name = str(getattr(settings, "OLLAMA_MODEL", "") or "").strip().lower()
+    if any(marker for marker in LLM_BATCH_DISABLED_MODELS if marker and marker in model_name):
+        return False
+    # phi4 family is much more reliable in strict single-review mode.
+    if STRICT_LLM_ANALYSIS and "phi4" in model_name:
+        return False
+    return True
+
+
+def _allocate_batch_tokens(total_tokens: int, batch_size: int) -> List[int]:
+    if batch_size <= 0:
+        return []
+    safe_total = max(0, int(total_tokens or 0))
+    base, remainder = divmod(safe_total, batch_size)
+    return [base + (1 if idx < remainder else 0) for idx in range(batch_size)]
+
+
+def _review_batch_key(payload: Dict[str, Any]) -> tuple:
+    return (
+        str(payload.get("analysis_mode", "workspace") or "workspace"),
+        str(payload.get("vertical", "generic") or "generic"),
+        str(payload.get("custom_instructions", "") or ""),
+        str(settings.OLLAMA_MODEL or ""),
+    )
+
+
+def _prompt_list_values() -> Dict[str, Any]:
+    lists = PROMPTS_DATA.get('lists', {})
+    return {
+        "all_emotions": lists.get('all_emotions', [
+            "Satisfaction", "Delight", "Excitement", "Trust", "Empathy", "Gratitude",
+            "Surprise", "Curiosity", "Hopefulness", "Skepticism", "Frustration",
+            "Disappointment", "Sadness", "Disgust", "Anger", "Confusion",
+            "Anxiety", "Dissatisfied"
+        ]),
+        "pain_points": lists.get('pain_points', "Billing/Feature/UX/Bug/Support/Other/Value"),
+        "intents": lists.get('intents', "Praise/Complaint/Suggest/Recommend/Question/Inform/Informative"),
+        "urgency_levels": lists.get('urgency_levels', "High/Medium/Low/None"),
+        "segments": lists.get('segments', "New/Veteran/Detractor/Promoter/Neutral"),
+        "churn_risks": lists.get('churn_risks', "high/medium/low/null"),
+        "sentiments": lists.get('sentiments', "positive/negative/neutral"),
+    }
+
+
+def _build_review_analysis_batch_prompt(items: List[Dict[str, Any]]) -> str:
+    first = items[0]["payload"]
+    list_values = _prompt_list_values()
+    return build_record_analysis_batch_prompt(
+        analysis_mode=str(first.get("analysis_mode", "workspace") or "workspace"),
+        vertical=str(first.get("vertical", "generic") or "generic"),
+        focus_keywords=str(first.get("focus_keywords", "") or ""),
+        custom_instructions=str(first.get("custom_instructions", "") or ""),
+        emotions_list=list_values["all_emotions"],
+        sentiments=list_values["sentiments"],
+        churn_risks=list_values["churn_risks"],
+        pain_points=list_values["pain_points"],
+        intents=list_values["intents"],
+        urgency_levels=list_values["urgency_levels"],
+        segments=list_values["segments"],
+        records=[
+            {
+                "request_id": item["request_id"],
+                "review_id": item["payload"].get("review_id", "unknown"),
+                "rating": item["payload"].get("rating", 3),
+                "content": item["payload"].get("content", ""),
+                "record_context": item["payload"].get("record_context", {}),
+            }
+            for item in items
+        ],
+    )
+
+
+class ReviewAnalysisBatcher:
+    """Co-batches compatible review-analysis requests across concurrent users/jobs."""
+
+    def __init__(self, max_items: int, max_wait_ms: int):
+        self.max_items = max(1, int(max_items or 1))
+        self.max_wait_ms = max(5, int(max_wait_ms or 5))
+        self._lock = threading.Lock()
+        self._pending: Dict[tuple, List[Dict[str, Any]]] = {}
+        self._timers: Dict[tuple, threading.Timer] = {}
+
+    def submit(self, payload: Dict[str, Any], stop_event=None) -> Dict[str, Any]:
+        future = concurrent.futures.Future()
+        request_id = str(payload.get("request_id", "") or "").strip()
+        if not request_id:
+            raise ValueError("Batched review-analysis payload requires request_id")
+
+        key = _review_batch_key(payload)
+        batch_item = {
+            "request_id": request_id,
+            "payload": dict(payload),
+            "future": future,
+            "submitted_at": time.time(),
+        }
+
+        to_flush: List[Dict[str, Any]] = []
+        with self._lock:
+            queue = self._pending.setdefault(key, [])
+            queue.append(batch_item)
+            if len(queue) >= self.max_items:
+                to_flush = self._take_pending_locked(key)
+                timer = self._timers.pop(key, None)
+                if timer:
+                    timer.cancel()
+            elif key not in self._timers:
+                timer = threading.Timer(self.max_wait_ms / 1000.0, self._flush_from_timer, args=(key,))
+                timer.daemon = True
+                self._timers[key] = timer
+                timer.start()
+
+        if to_flush:
+            self._dispatch_flush(to_flush)
+
+        while True:
+            try:
+                return future.result(timeout=0.25)
+            except concurrent.futures.TimeoutError:
+                if stop_event is not None and getattr(stop_event, "is_set", lambda: False)():
+                    return {
+                        "ok": False,
+                        "error": "Analysis cancelled while waiting for batched LLM response.",
+                        "fallback_reason": "analysis_cancelled",
+                        "batched": True,
+                        "batch_size": len(to_flush) or 1,
+                    }
+
+    def _take_pending_locked(self, key: tuple) -> List[Dict[str, Any]]:
+        queued = list(self._pending.pop(key, []))
+        return queued
+
+    def _flush_from_timer(self, key: tuple) -> None:
+        to_flush: List[Dict[str, Any]] = []
+        with self._lock:
+            self._timers.pop(key, None)
+            to_flush = self._take_pending_locked(key)
+        if to_flush:
+            self._dispatch_flush(to_flush)
+
+    def _dispatch_flush(self, items: List[Dict[str, Any]]) -> None:
+        worker = threading.Thread(target=self._flush_batch, args=(items,), daemon=True)
+        worker.start()
+
+    def _resolve_items(self, items: List[Dict[str, Any]], response: Dict[str, Any]) -> None:
+        for item in items:
+            future = item["future"]
+            if not future.done():
+                future.set_result(dict(response))
+
+    def _flush_batch(self, items: List[Dict[str, Any]]) -> None:
+        batch_size = len(items)
+        try:
+            prompt = _build_review_analysis_batch_prompt(items)
+            num_predict = max(192, min(900, 170 * batch_size + 72))
+            llm_result = _request_review_llm_completion(
+                prompt,
+                num_predict=num_predict,
+                timeout_seconds=ANALYSIS_LLM_TIMEOUT_SECONDS,
+                retries=ANALYSIS_LLM_REQUEST_RETRIES,
+                num_ctx=_effective_num_ctx(prompt, num_predict),
+            )
+            if not llm_result.get("ok"):
+                self._resolve_items(
+                    items,
+                    {
+                        "ok": False,
+                        "error": str(llm_result.get("error") or "Unknown batched LLM request failure."),
+                        "fallback_reason": "llm_batch_request_failed",
+                        "batched": True,
+                        "batch_size": batch_size,
+                    },
+                )
+                return
+
+            raw_text = str(llm_result.get("text") or "")
+            parsed_by_request = parse_llm_batch_json(raw_text)
+            token_shares = _allocate_batch_tokens(int(llm_result.get("tokens", 0) or 0), batch_size)
+
+            for idx, item in enumerate(items):
+                request_id = item["request_id"]
+                parsed = parsed_by_request.get(request_id)
+                if not isinstance(parsed, dict):
+                    item["future"].set_result(
+                        {
+                            "ok": False,
+                            "error": f"Batch response omitted request_id={request_id}.",
+                            "fallback_reason": "llm_batch_missing_item",
+                            "batched": True,
+                            "batch_size": batch_size,
+                            "raw_response": raw_text,
+                        }
+                    )
+                    continue
+
+                expected_review_id = str(item["payload"].get("review_id", "") or "").strip()
+                actual_review_id = str(parsed.get("review_id", "") or "").strip()
+                if expected_review_id and actual_review_id and actual_review_id != expected_review_id:
+                    item["future"].set_result(
+                        {
+                            "ok": False,
+                            "error": (
+                                f"Batch response review_id mismatch for request_id={request_id}: "
+                                f"expected {expected_review_id}, got {actual_review_id}."
+                            ),
+                            "fallback_reason": "llm_batch_identity_mismatch",
+                            "batched": True,
+                            "batch_size": batch_size,
+                            "raw_response": raw_text,
+                        }
+                    )
+                    continue
+
+                item["future"].set_result(
+                    {
+                        "ok": True,
+                        "parsed": parsed,
+                        "tokens": token_shares[idx] if idx < len(token_shares) else 0,
+                        "batched": True,
+                        "batch_size": batch_size,
+                    }
+                )
+        except Exception as error:
+            error_text = str(error)
+            telemetry.log_error(
+                error_type="llm_batch_parse_error",
+                message=error_text,
+                raw_response=locals().get("raw_text"),
+            )
+            self._resolve_items(
+                items,
+                {
+                    "ok": False,
+                    "error": error_text,
+                    "fallback_reason": "llm_batch_parse_error",
+                    "batched": True,
+                    "batch_size": batch_size,
+                    "raw_response": locals().get("raw_text"),
+                },
+            )
+
+
+_review_analysis_batcher_lock = threading.Lock()
+_review_analysis_batcher: Optional[ReviewAnalysisBatcher] = None
+
+
+def _get_review_analysis_batcher() -> ReviewAnalysisBatcher:
+    global _review_analysis_batcher
+    with _review_analysis_batcher_lock:
+        if _review_analysis_batcher is None:
+            _review_analysis_batcher = ReviewAnalysisBatcher(
+                max_items=ANALYSIS_BATCH_MAX_ITEMS,
+                max_wait_ms=ANALYSIS_BATCH_MAX_WAIT_MS,
+            )
+        return _review_analysis_batcher
+
+
+def _request_review_llm_completion(
+    prompt: str,
+    *,
+    num_predict: int,
+    timeout_seconds: int,
+    retries: int,
+    num_ctx: int,
+    stop_event=None,
+) -> Dict[str, Any]:
+    attempt_errors: List[str] = []
+    last_result: Dict[str, Any] = {
+        "ok": False,
+        "text": "",
+        "tokens": 0,
+        "error": "Unknown LLM request failure.",
+    }
+
+    for label, response_format in (("json", "json"), ("plain", None)):
+        if stop_event is not None and getattr(stop_event, "is_set", lambda: False)():
+            break
+
+        result = llm_gateway.request_completion(
+            prompt,
+            model=settings.OLLAMA_MODEL,
+            num_predict=num_predict,
+            response_format=response_format,
+            timeout_seconds=timeout_seconds,
+            retries=retries,
+            num_ctx=num_ctx,
+            stop_event=stop_event,
+            temperature=0.05,
+            top_p=0.9,
+        )
+        last_result = dict(result)
+
+        if result.get("ok") and str(result.get("text") or "").strip():
+            last_result["format_fallback_used"] = response_format is None
+            last_result["response_format"] = "plain" if response_format is None else "json"
+            return last_result
+
+        attempt_errors.append(f"{label}: {str(result.get('error') or 'request failed')}")
+        if response_format is None:
+            break
+
+    if attempt_errors:
+        last_result["error"] = " | ".join(attempt_errors[:2])
+    last_result["format_fallback_used"] = False
+    last_result["response_format"] = ""
+    return last_result
+
+
+def request_review_analysis(payload: Dict[str, Any], stop_event=None) -> Dict[str, Any]:
+    if _should_use_review_batching():
+        return _get_review_analysis_batcher().submit(payload, stop_event=stop_event)
+
+    prompt_lists = _prompt_list_values()
+    prompt = build_record_analysis_prompt(
+        analysis_mode=str(payload.get("analysis_mode", "workspace") or "workspace"),
+        vertical=str(payload.get("vertical", "generic") or "generic"),
+        focus_keywords=str(payload.get("focus_keywords", "") or ""),
+        custom_instructions=str(payload.get("custom_instructions", "") or ""),
+        emotions_list=prompt_lists["all_emotions"],
+        sentiments=prompt_lists["sentiments"],
+        churn_risks=prompt_lists["churn_risks"],
+        pain_points=prompt_lists["pain_points"],
+        intents=prompt_lists["intents"],
+        urgency_levels=prompt_lists["urgency_levels"],
+        segments=prompt_lists["segments"],
+        rating=int(payload.get("rating", 3) or 3),
+        content=str(payload.get("content", "") or ""),
+        review_id=str(payload.get("review_id", "unknown") or "unknown"),
+        record_context=dict(payload.get("record_context") or {}),
+    )
+    llm_result = _request_review_llm_completion(
+        prompt,
+        stop_event=stop_event,
+        num_predict=256,
+        timeout_seconds=ANALYSIS_LLM_TIMEOUT_SECONDS,
+        retries=ANALYSIS_LLM_REQUEST_RETRIES,
+        num_ctx=_effective_num_ctx(prompt, 256),
+    )
+    if not llm_result.get("ok"):
+        return {
+            "ok": False,
+            "error": str(llm_result.get("error") or "LLM connected but returned an empty or unusable response."),
+            "fallback_reason": str(llm_result.get("fallback_reason") or "llm_empty_response"),
+            "batched": False,
+            "batch_size": 1,
+            "raw_error": llm_result.get("raw_error"),
+        }
+    response_text = str(llm_result.get("text") or "")
+    tokens = int(llm_result.get("tokens", 0) or 0)
+    if not response_text:
+        return {
+            "ok": False,
+            "error": "LLM connected but returned an empty or unusable response.",
+            "fallback_reason": "llm_empty_response",
+            "batched": False,
+            "batch_size": 1,
+        }
+    return {
+        "ok": True,
+        "text": response_text,
+        "tokens": tokens,
+        "batched": False,
+        "batch_size": 1,
+        "format_fallback_used": bool(llm_result.get("format_fallback_used")),
+        "response_format": str(llm_result.get("response_format") or ""),
+    }
 
 def analyze_single_review_task(review_data, vertical, custom_instructions=None, stop_event=None, pause_event=None, pattern_matcher=None, analysis_mode="workspace"):
     """
@@ -1273,12 +2049,22 @@ def analyze_single_review_task(review_data, vertical, custom_instructions=None, 
         'language_focus': False,
         'html_shield': True,
     })
+    if not isinstance(_adv_cleaning_options, dict):
+        _adv_cleaning_options = {
+            'token_efficiency': True,
+            'magic_clean': True,
+            'language_focus': False,
+            'html_shield': True,
+        }
+    dedup_registry = _adv_cleaning_options.get('dedup_registry')
 
     if isinstance(precleaned_content, str):
         content = precleaned_content.strip()
         _noise_score = preclean_noise_score
-        _adv_flags = preclean_flags
+        _adv_flags = list(preclean_flags)
         _clean_token_estimate = preclean_token_estimate
+        if content and 'duplicate' not in _adv_flags and _check_duplicate_with_registry(content, dedup_registry):
+            _adv_flags.append('duplicate')
     else:
         # Step 0B: Translate non-English FIRST (before emoji/cleaning strips the original text)
         if raw_content and detect_non_english(raw_content):
@@ -1299,33 +2085,22 @@ def analyze_single_review_task(review_data, vertical, custom_instructions=None, 
         _clean_token_estimate = int(adv.get('token_estimate', 0) or 0)
     _cleaned_text = content
 
-    # Duplicates still get deterministic fallback so no record is dropped.
+    # In strict mode we never shortcut to heuristic fallback.
     if isinstance(precleaned_content, str):
         is_duplicate = 'duplicate' in _adv_flags
     else:
-        is_duplicate = adv.get('was_duplicate')
-    if is_duplicate:
-        fallback = rule_based_fallback_analysis(review_data, content or raw_content, rating_value)
-        fallback['_meta_reason'] = 'duplicate_fallback'
-        fallback['_noise_score'] = _noise_score
-        fallback['_clean_flags'] = _adv_flags
-        fallback['_cleaned_text'] = _cleaned_text
-        fallback['_clean_token_estimate'] = _clean_token_estimate
-        return fallback
+        is_duplicate = bool(adv.get('was_duplicate'))
+    if is_duplicate and 'duplicate' not in _adv_flags:
+        _adv_flags.append('duplicate')
 
-    # If language_focus filtered this out, still return fallback analysis.
+    # If language filtering blanked content, keep the original text for model analysis.
     if not content and 'non_english_filtered' in _adv_flags:
-        fallback = rule_based_fallback_analysis(review_data, raw_content, rating_value)
-        fallback['_meta_reason'] = 'language_filtered_fallback'
-        fallback['_noise_score'] = _noise_score
-        fallback['_clean_flags'] = _adv_flags
-        fallback['_cleaned_text'] = _cleaned_text
-        fallback['_clean_token_estimate'] = _clean_token_estimate
-        return fallback
+        content = str(raw_content or '').strip()
+        _cleaned_text = content
 
-    # Fallback: if advanced clean wiped too much, use base cleaned content
+    # If advanced cleaning wiped too much, fall back to base cleaned content.
     if not content:
-        content = clean_review_text(raw_content)
+        content = clean_review_text(raw_content) or str(raw_content or '').strip()
         _cleaned_text = content
 
     # --- Step 0: Pattern Matching (Cache Hit) ---
@@ -1368,145 +2143,134 @@ def analyze_single_review_task(review_data, vertical, custom_instructions=None, 
     len(content.strip()) < 5
     
     # Get config for vertical
-    # Get config for vertical
     vertical_config = DOMAIN_CONFIG.get(vertical, DOMAIN_CONFIG.get('generic', {}))
-    vertical_config.get('focus_keywords', '')
-    brand_risk_keywords = vertical_config.get('brand_risk_keywords', [])
-    vertical_config.get('competitor_keywords', [])
-    
-
-    # --- Strict Lists of Allowed Values for Constrained Output (Ported from W4.py) ---
-    lists = PROMPTS_DATA.get('lists', {})
-    all_emotions = lists.get('all_emotions', [
-        "Satisfaction", "Delight", "Excitement", "Trust", "Empathy", "Gratitude",
-        "Surprise", "Curiosity", "Hopefulness", "Skepticism", "Frustration",
-        "Disappointment", "Sadness", "Disgust", "Anger", "Confusion",
-        "Anxiety", "Dissatisfied"
-    ])
-    pain_points_list = lists.get('pain_points', "Billing/Feature/UX/Bug/Support/Other/Value")
-    intents_list = lists.get('intents', "Praise/Complaint/Suggest/Recommend/Question/Inform/Informative")
-    urgency_levels_list = lists.get('urgency_levels', "High/Medium/Low/None")
-    lists.get('segments', "New/Veteran/Detractor/Promoter/Neutral")
-    lists.get('churn_risks', "high/medium/low/null")
-    sentiments_list = lists.get('sentiments', "positive/negative/neutral")
-    
-    # Get sector-specific terminology
-    terminology = VERTICAL_TERMINOLOGY.get(vertical, VERTICAL_TERMINOLOGY.get("generic", {}))
-    terminology.get('churn_label', 'Churn Risk')
-    terminology.get('pain_point_label', 'Failure Surface')
-    terminology.get('feature_request_label', 'Expansion Demand')
-    terminology.get('negative_label', 'Negative Signals')
-    
-    # Build string representations for template injection
-    emotions_str = ', '.join(f'"{e}"' for e in all_emotions)
-    
+    focus_keywords = vertical_config.get('focus_keywords', '')
     sanitized_instructions = sanitize_custom_instructions(custom_instructions)
     resolved_mode = infer_analysis_mode(review_data, analysis_mode)
-
-    prompt = build_record_analysis_prompt(
-        analysis_mode=resolved_mode,
-        vertical=vertical,
-        focus_keywords=vertical_config.get('focus_keywords', ''),
-        custom_instructions=sanitized_instructions or "",
-        emotions_list=all_emotions,
-        sentiments=sentiments_list,
-        churn_risks=lists.get('churn_risks', 'high/medium/low/null'),
-        pain_points=pain_points_list,
-        intents=intents_list,
-        urgency_levels=urgency_levels_list,
-        segments=lists.get('segments', 'New/Veteran/Detractor/Promoter/Neutral'),
-        rating=rating_value if str(rating).strip() else 3,
-        content=content_for_prompt,
-        review_id=prompt_review_id,
-        record_context={
+    analysis_payload = {
+        "request_id": str(review_data.get("_analysis_request_id") or uuid.uuid4().hex),
+        "analysis_mode": resolved_mode,
+        "vertical": vertical,
+        "focus_keywords": focus_keywords,
+        "custom_instructions": sanitized_instructions or "",
+        "rating": rating_value if str(rating).strip() else 3,
+        "content": content_for_prompt,
+        "review_id": prompt_review_id,
+        "record_context": {
             "source": str(review_data.get('source', '') or ''),
             "source_type": str(review_data.get('source_type', review_data.get('connector_type', '')) or ''),
             "author": str(review_data.get('author', review_data.get('userName', '')) or ''),
             "customer_identifier": str(review_data.get('customer_identifier', '') or ''),
         },
+    }
+
+    attempt_errors: List[str] = []
+    max_llm_attempts = max(
+        1,
+        STRICT_ANALYSIS_MAX_ATTEMPTS if STRICT_LLM_ANALYSIS else max(2, ANALYSIS_LLM_REQUEST_RETRIES),
     )
+    last_tokens = 0
+    last_batched = False
+    last_batch_size = 1
+    last_response = ""
 
-    # Query LLM (Force JSON schema format)
-    response_data = query_ollama(
-        prompt,
-        stop_event=stop_event,
-        num_predict=180,
-        response_format="json",
-        return_tokens=True,
+    for attempt_idx in range(max_llm_attempts):
+        if stop_event and stop_event.is_set():
+            return None
+
+        llm_response = request_review_analysis(analysis_payload, stop_event=stop_event)
+        last_response = str(llm_response.get("text") or "")
+        last_tokens = int(llm_response.get("tokens", 0) or 0)
+        last_batched = bool(llm_response.get("batched"))
+        last_batch_size = int(llm_response.get("batch_size", 1) or 1)
+
+        if not llm_response.get("ok"):
+            reason = str(llm_response.get("fallback_reason") or "llm_empty_response")
+            message = str(llm_response.get("error") or "LLM connected but returned an empty or unusable response.")
+            telemetry.log_error(
+                error_type=reason,
+                message=message,
+                review_id=review_id,
+                raw_response=llm_response.get("raw_response"),
+            )
+            attempt_errors.append(f"{reason}: {message}")
+            continue
+
+        try:
+            obj = llm_response.get("parsed")
+            if not isinstance(obj, dict):
+                obj = parse_llm_json(last_response)
+            result = validate_and_repair_json(obj)
+
+            # Merge result with original review data to preserve metadata (ID, Date, Score, etc.)
+            full_result = {
+                **review_data,
+                **map_result_to_schema(result),
+                '_meta_tokens': last_tokens,
+                '_noise_score': _noise_score,
+                '_clean_flags': _adv_flags,
+                '_cleaned_text': _cleaned_text,
+                '_clean_token_estimate': _clean_token_estimate,
+                '_meta_batched': last_batched,
+                '_meta_batch_size': last_batch_size,
+                '_meta_attempt': attempt_idx + 1,
+            }
+            if is_duplicate:
+                full_result['_meta_duplicate'] = True
+
+            # --- Step 2: Save successful result as Pattern & Context Graph ---
+            if ADVANCED_FEATURES_AVAILABLE:
+                try:
+                    if pattern_matcher:
+                        pattern_matcher.save_pattern(content, rating, result, source, vertical)
+
+                    cg_node = ContextGraphBuilder.build_graph_from_llm_result(review_data, result)
+                    if cg_node:
+                        ContextGraphManager(db_path=DB_PATH).save_decision(cg_node)
+                except Exception as e:
+                    print(f"Error saving context/patterns: {e}")
+
+            return full_result
+
+        except ValueError as parse_err:
+            err_text = str(parse_err)
+            log_debug(f"[DEBUG PARSER FATAL ERROR FOR REVIEW {review_id} ATTEMPT {attempt_idx + 1}/{max_llm_attempts}]: {err_text}")
+            log_debug(f"[DEBUG PARSER RAW LLM STRING]: {last_response}")
+            telemetry.log_error(
+                error_type="json_parse_error",
+                message=err_text,
+                review_id=review_id,
+                raw_response=last_response,
+            )
+            attempt_errors.append(f"json_parse_error: {err_text}")
+            continue
+
+        except Exception as e:
+            err_text = str(e)
+            log_debug(f"[DEBUG GENERIC ERROR FOR REVIEW {review_id} ATTEMPT {attempt_idx + 1}/{max_llm_attempts}]: {err_text}")
+            log_debug(f"[DEBUG GENERIC ERROR RAW LLM]: {last_response}")
+            telemetry.log_error(
+                error_type="worker_generic_error",
+                message=err_text,
+                review_id=review_id,
+                raw_response=last_response,
+            )
+            attempt_errors.append(f"worker_exception: {err_text}")
+            continue
+
+    return _build_unresolved_result(
+        review_data,
+        reason="llm_exhausted",
+        raw_content=raw_content,
+        error_detail=" | ".join(attempt_errors[:4]) if attempt_errors else "LLM analysis exhausted all attempts without valid JSON output.",
+        noise_score=_noise_score,
+        clean_flags=_adv_flags,
+        cleaned_text=_cleaned_text,
+        clean_token_estimate=_clean_token_estimate,
+        tokens=last_tokens,
+        batched=last_batched,
+        batch_size=last_batch_size,
     )
-    if response_data:
-        response, tokens = response_data
-    else:
-        response, tokens = None, 0
-    
-    # --- Exact W4.py JSON Parsing Logic ---
-    if not response:
-        # LLM returned nothing — use rule-based fallback (NEVER leave unanalyzed)
-        telemetry.log_error(error_type="llm_empty_response", message="LLM connected but returned an empty or completely unparseable string", review_id=review_id)
-        fallback = rule_based_fallback_analysis(review_data, content, rating_value)
-        fallback['_meta_reason'] = 'llm_empty_response'
-        fallback['_noise_score'] = _noise_score
-        fallback['_clean_flags'] = _adv_flags
-        fallback['_cleaned_text'] = _cleaned_text
-        fallback['_clean_token_estimate'] = _clean_token_estimate
-        return fallback
-
-
-    try:
-        # Abstracted robust JSON parsing
-        obj = parse_llm_json(response)
-        result = validate_and_repair_json(obj)
-        
-        # Merge result with original review data to preserve metadata (ID, Date, Score, etc.)
-        full_result = {
-            **review_data,
-            **map_result_to_schema(result),
-            '_meta_tokens': tokens,
-            '_noise_score': _noise_score,
-            '_clean_flags': _adv_flags,
-            '_cleaned_text': _cleaned_text,
-            '_clean_token_estimate': _clean_token_estimate,
-        }
-        
-        # --- Step 2: Save successful result as Pattern & Context Graph ---
-        if ADVANCED_FEATURES_AVAILABLE:
-            try:
-                if pattern_matcher:
-                    pattern_matcher.save_pattern(content, rating, result, source, vertical)
-                
-                cg_node = ContextGraphBuilder.build_graph_from_llm_result(review_data, result)
-                if cg_node:
-                    ContextGraphManager(db_path=DB_PATH).save_decision(cg_node)
-            except Exception as e:
-                print(f"Error saving context/patterns: {e}")
-                
-        return full_result
-            
-    except ValueError as parse_err:
-        log_debug(f"[DEBUG PARSER FATAL ERROR FOR REVIEW {review_id}]: {parse_err}")
-        log_debug(f"[DEBUG PARSER RAW LLM STRING]: {response}")
-        telemetry.log_error(error_type="json_parse_error", message=str(parse_err), review_id=review_id, raw_response=response)
-        # Use rule-based fallback instead of marking as error
-        fallback = rule_based_fallback_analysis(review_data, content, rating_value)
-        fallback['_meta_reason'] = 'json_parse_error_fallback'
-        fallback['_noise_score'] = _noise_score
-        fallback['_clean_flags'] = _adv_flags
-        fallback['_cleaned_text'] = _cleaned_text
-        fallback['_clean_token_estimate'] = _clean_token_estimate
-        return fallback
-
-    except Exception as e:
-        log_debug(f"[DEBUG GENERIC ERROR FOR REVIEW {review_id}]: {str(e)}")
-        log_debug(f"[DEBUG GENERIC ERROR RAW LLM]: {response}")
-        telemetry.log_error(error_type="worker_generic_error", message=str(e), review_id=review_id, raw_response=response)
-        # Use rule-based fallback — NEVER leave a review unanalyzed
-        fallback = rule_based_fallback_analysis(review_data, content, rating_value)
-        fallback['_meta_reason'] = 'worker_exception_fallback'
-        fallback['_noise_score'] = _noise_score
-        fallback['_clean_flags'] = _adv_flags
-        fallback['_cleaned_text'] = _cleaned_text
-        fallback['_clean_token_estimate'] = _clean_token_estimate
-        return fallback
 
 def map_result_to_schema(result):
     """Ensure result keys match what we expect, just in case."""
@@ -1537,7 +2301,7 @@ def _run_window(window_reviews, window_idx, global_results, index_map,
     pending = set()
     stop_requested = False
     idle_no_result_seconds = 0
-    hard_idle_fallback_seconds = max(WINDOW_IDLE_FALLBACK_SECONDS, OLLAMA_REQUEST_TIMEOUT_SECONDS * 3)
+    hard_idle_fallback_seconds = max(WINDOW_IDLE_FALLBACK_SECONDS, ANALYSIS_LLM_TIMEOUT_SECONDS * 3)
     try:
         for local_idx, review in enumerate(window_reviews):
             if stop_event and stop_event.is_set():
@@ -1571,32 +2335,26 @@ def _run_window(window_reviews, window_idx, global_results, index_map,
                 if idle_no_result_seconds >= hard_idle_fallback_seconds:
                     log_debug(
                         f"[WINDOW {window_idx}] No completed futures for "
-                        f"{idle_no_result_seconds}s; forcing fallback for {len(pending)} pending review(s)."
+                        f"{idle_no_result_seconds}s; marking {len(pending)} pending review(s) as unresolved."
                     )
                     stop_requested = True
                     for pending_future in list(pending):
                         local_idx = future_to_local[pending_future]
                         global_idx = index_map[local_idx]
                         original_review = window_reviews[local_idx]
-                        fallback_rating = original_review.get('score', original_review.get('rating', 3))
-                        try:
-                            fallback_rating = int(float(fallback_rating))
-                        except (TypeError, ValueError):
-                            fallback_rating = 3
-                        fallback = rule_based_fallback_analysis(
+                        unresolved = _build_unresolved_result(
                             original_review,
-                            str(original_review.get('content', '')),
-                            fallback_rating,
+                            reason='window_hard_timeout',
+                            raw_content=str(original_review.get('content', '')),
+                            error_detail=(
+                                f"No completed worker futures for {idle_no_result_seconds}s "
+                                f"(window timeout budget={hard_idle_fallback_seconds}s)."
+                            ),
                         )
-                        fallback['_meta_tokens'] = 0
-                        fallback['_meta_fallback'] = True
-                        fallback['_meta_error'] = False
-                        fallback['_meta_reason'] = 'window_hard_timeout_fallback'
-                        fallback['_meta_raw_content'] = original_review.get('content', '')
-                        global_results[global_idx] = fallback
+                        global_results[global_idx] = unresolved
                         if on_result:
-                            on_result(global_idx, fallback, window_idx, local_idx)
-                        succeeded += 1
+                            on_result(global_idx, unresolved, window_idx, local_idx)
+                        errored += 1
                         pending_future.cancel()
                     pending.clear()
                     break
@@ -1615,15 +2373,12 @@ def _run_window(window_reviews, window_idx, global_results, index_map,
                 try:
                     res = future.result(timeout=360)
                     if res is None:
-                        res = {
-                            **original_review,
-                            **DEFAULT_VALUES.copy(),
-                            '_meta_tokens': 0,
-                            '_meta_error': False,  # stopped, not an error
-                            '_meta_fallback': True,
-                            '_meta_reason': 'empty_worker_result',
-                            '_meta_raw_content': original_review.get('content', ''),
-                        }
+                        res = _build_unresolved_result(
+                            original_review,
+                            reason='empty_worker_result',
+                            raw_content=str(original_review.get('content', '')),
+                            error_detail="Worker returned no payload.",
+                        )
                     global_results[global_idx] = res
                     if on_result:
                         on_result(global_idx, res, window_idx, local_idx)
@@ -1633,29 +2388,23 @@ def _run_window(window_reviews, window_idx, global_results, index_map,
                         succeeded += 1
                 except concurrent.futures.TimeoutError:
                     log_debug(f"[WINDOW {window_idx}] Task local={local_idx} global={global_idx} timed out")
-                    global_results[global_idx] = {
-                        **original_review,
-                        **DEFAULT_VALUES.copy(),
-                        '_meta_tokens': 0,
-                        '_meta_error': True,
-                        '_meta_fallback': True,
-                        '_meta_reason': 'window_timeout',
-                        '_meta_raw_content': original_review.get('content', '')
-                    }
+                    global_results[global_idx] = _build_unresolved_result(
+                        original_review,
+                        reason='window_timeout',
+                        raw_content=str(original_review.get('content', '')),
+                        error_detail="Future timed out while waiting for worker result.",
+                    )
                     if on_result:
                         on_result(global_idx, global_results[global_idx], window_idx, local_idx)
                     errored += 1
                 except Exception as exc:
                     log_debug(f"[WINDOW {window_idx}] Task local={local_idx} exception: {exc}")
-                    global_results[global_idx] = {
-                        **original_review,
-                        **DEFAULT_VALUES.copy(),
-                        '_meta_tokens': 0,
-                        '_meta_error': True,
-                        '_meta_fallback': True,
-                        '_meta_reason': 'window_exception',
-                        '_meta_raw_content': original_review.get('content', str(exc))
-                    }
+                    global_results[global_idx] = _build_unresolved_result(
+                        original_review,
+                        reason='window_exception',
+                        raw_content=str(original_review.get('content', str(exc))),
+                        error_detail=str(exc),
+                    )
                     if on_result:
                         on_result(global_idx, global_results[global_idx], window_idx, local_idx)
                     errored += 1
@@ -1683,10 +2432,17 @@ def run_analysis_batch(reviews_list: List[Dict[str, Any]], vertical: str, custom
     """
     job_uuid = str(uuid.uuid4())
     start_time = time.time()
-    total = len(reviews_list)
+    batch_dedup_registry = create_dedup_registry()
+    prepared_reviews: List[Dict[str, Any]] = []
+    for review in reviews_list:
+        prepared_review = dict(review)
+        cleaning_options = dict(prepared_review.get('_cleaning_options') or {})
+        cleaning_options['dedup_registry'] = batch_dedup_registry
+        prepared_review['_cleaning_options'] = cleaning_options
+        prepared_reviews.append(prepared_review)
 
-    # Reset deduplication cache — each batch starts fresh
-    _reset_dedup_cache()
+    reviews_list = prepared_reviews
+    total = len(reviews_list)
 
     # Ordered result slots — None means not yet processed
     results = [None] * total
@@ -1918,7 +2674,14 @@ def run_analysis_batch(reviews_list: List[Dict[str, Any]], vertical: str, custom
             logger.info(f"Pass {retry_pass}/{MAX_RETRY_PASSES}: "
                   f"Retrying {len(error_indices)} failed review(s)...")
 
-            retry_reviews = [reviews_list[i] for i in error_indices]
+            retry_dedup_registry = create_dedup_registry()
+            retry_reviews = []
+            for i in error_indices:
+                retry_review = dict(reviews_list[i])
+                retry_cleaning_options = dict(retry_review.get('_cleaning_options') or {})
+                retry_cleaning_options['dedup_registry'] = retry_dedup_registry
+                retry_review['_cleaning_options'] = retry_cleaning_options
+                retry_reviews.append(retry_review)
             retry_results_tmp = [None] * len(retry_reviews)
 
             # Process retry batch in token windows too
@@ -1954,11 +2717,6 @@ def run_analysis_batch(reviews_list: List[Dict[str, Any]], vertical: str, custom
                 if row is not None:
                     continue
                 source_review = reviews_list[idx]
-                source_rating = source_review.get('score', source_review.get('rating', 3))
-                try:
-                    source_rating = int(float(source_rating))
-                except (TypeError, ValueError):
-                    source_rating = 3
                 source_text = (
                     source_review.get('content')
                     or source_review.get('text')
@@ -1966,15 +2724,16 @@ def run_analysis_batch(reviews_list: List[Dict[str, Any]], vertical: str, custom
                     or source_review.get('review')
                     or ''
                 )
-                fallback = rule_based_fallback_analysis(source_review, str(source_text), source_rating)
-                fallback['_meta_fallback'] = True
-                fallback['_meta_reason'] = 'missing_slot_safety_fallback'
-                fallback['_meta_error'] = True
-                fallback['_meta_raw_content'] = str(source_text)
-                results[idx] = fallback
+                unresolved = _build_unresolved_result(
+                    source_review,
+                    reason='missing_result_slot',
+                    raw_content=str(source_text),
+                    error_detail="Result slot remained empty after retries.",
+                )
+                results[idx] = unresolved
                 telemetry.log_error(
                     error_type="missing_result_slot",
-                    message=f"Auto-filled fallback for review index {idx}",
+                    message=f"Marked unresolved result slot for review index {idx}",
                     review_id=source_review.get('id', source_review.get('review_id', 'Unknown')),
                     job_uuid=job_uuid,
                 )

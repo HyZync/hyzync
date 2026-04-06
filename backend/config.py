@@ -4,6 +4,13 @@ from typing import Annotated, List
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
+_CONFIG_DIR = os.path.dirname(__file__)
+_ROOT_DIR = os.path.dirname(_CONFIG_DIR)
+_ENV_FILES = (
+    os.path.join(_CONFIG_DIR, ".env"),
+    os.path.join(_ROOT_DIR, ".env"),
+)
+
 class Settings(BaseSettings):
     # Core API Settings
     PROJECT_NAME: str = "Hyzync Intelligence API"
@@ -30,20 +37,34 @@ class Settings(BaseSettings):
     ]
     
     # LLM Service
-    OLLAMA_URL: str = os.getenv("OLLAMA_URL", "https://ai.hyzync.com")
+    # Prefer explicit OLLAMA_URL, but support legacy OLLAMA_BASE_URL automatically.
+    OLLAMA_URL: str = os.getenv("OLLAMA_URL", os.getenv("OLLAMA_BASE_URL", "https://ai.hyzync.com"))
     OLLAMA_FALLBACK_URLS: str = os.getenv("OLLAMA_FALLBACK_URLS", "")
-    OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "qwen3.5:4b")
+    OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "phi4-mini")
     # Keep defaults practical for remote inference latency; override via env when needed.
     OLLAMA_NUM_CTX: int = int(os.getenv("OLLAMA_NUM_CTX", "8192"))
     ANALYSIS_CONTEXT_WINDOW_TOKENS: int = int(os.getenv("ANALYSIS_CONTEXT_WINDOW_TOKENS", "8192"))
     ANALYSIS_CONTEXT_HEADROOM: float = float(os.getenv("ANALYSIS_CONTEXT_HEADROOM", "0.85"))
-    OLLAMA_REQUEST_TIMEOUT_SECONDS: int = int(os.getenv("OLLAMA_REQUEST_TIMEOUT_SECONDS", "90"))
+    OLLAMA_REQUEST_TIMEOUT_SECONDS: int = int(os.getenv("OLLAMA_REQUEST_TIMEOUT_SECONDS", "300"))
+    OLLAMA_REMOTE_REQUEST_TIMEOUT_SECONDS: int = int(
+        os.getenv("OLLAMA_REMOTE_REQUEST_TIMEOUT_SECONDS", os.getenv("OLLAMA_REQUEST_TIMEOUT_SECONDS", "300"))
+    )
+    ANALYSIS_LLM_TIMEOUT_SECONDS: int = int(
+        os.getenv("ANALYSIS_LLM_TIMEOUT_SECONDS", os.getenv("OLLAMA_REQUEST_TIMEOUT_SECONDS", "300"))
+    )
     OLLAMA_REQUEST_RETRIES: int = int(os.getenv("OLLAMA_REQUEST_RETRIES", "1"))
     WINDOW_IDLE_FALLBACK_SECONDS: int = int(os.getenv("WINDOW_IDLE_FALLBACK_SECONDS", "0"))
     OLLAMA_PREFLIGHT_TIMEOUT_SECONDS: int = int(os.getenv("OLLAMA_PREFLIGHT_TIMEOUT_SECONDS", "30"))
     LLM_MAX_CONCURRENCY: int = 3
     LLM_WINDOW_MAX_WORKERS_REMOTE: int = 3
     LLM_WINDOW_MAX_WORKERS_LOCAL: int = 4
+    LLM_BATCHING_ENABLED: bool = str(os.getenv("LLM_BATCHING_ENABLED", "true")).strip().lower() not in {"0", "false", "no", "off"}
+    LLM_BATCH_MAX_ITEMS: int = int(os.getenv("LLM_BATCH_MAX_ITEMS", "4"))
+    LLM_BATCH_MAX_WAIT_MS: int = int(os.getenv("LLM_BATCH_MAX_WAIT_MS", "40"))
+    LLM_BATCH_DISABLED_MODELS: str = os.getenv("LLM_BATCH_DISABLED_MODELS", "phi4-mini,phi4-free,phi-4-mini")
+    STRICT_LLM_ANALYSIS: bool = str(os.getenv("STRICT_LLM_ANALYSIS", "true")).strip().lower() not in {"0", "false", "no", "off"}
+    STRICT_ANALYSIS_MAX_ATTEMPTS: int = int(os.getenv("STRICT_ANALYSIS_MAX_ATTEMPTS", "5"))
+    STRICT_ANALYSIS_FAIL_ON_UNRESOLVED: bool = str(os.getenv("STRICT_ANALYSIS_FAIL_ON_UNRESOLVED", "true")).strip().lower() not in {"0", "false", "no", "off"}
     LLM_BILLING_RATE_PER_1K_TOKENS: float = float(os.getenv("LLM_BILLING_RATE_PER_1K_TOKENS", "0.0015"))
     
     # Rate Limiting
@@ -70,7 +91,7 @@ class Settings(BaseSettings):
         return value
     
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=_ENV_FILES,
         env_file_encoding="utf-8",
         case_sensitive=True,
         extra='ignore'

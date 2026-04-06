@@ -16,13 +16,13 @@ logger = logging.getLogger("hyzync.llm_gateway")
 
 _session = requests.Session()
 _retry_strategy = Retry(
-    total=0,
-    connect=0,
+    total=2,
+    connect=2,
     read=0,
-    status=0,
+    status=1,
     other=0,
-    backoff_factor=0,
-    status_forcelist=[],
+    backoff_factor=0.5,
+    status_forcelist=[502, 503, 504],
     allowed_methods=["GET", "POST"],
 )
 _adapter = HTTPAdapter(max_retries=_retry_strategy, pool_connections=8, pool_maxsize=8)
@@ -33,7 +33,43 @@ _active_base_url_lock = threading.Lock()
 _active_base_url = str(getattr(settings, "OLLAMA_URL", "") or "").strip().rstrip("/")
 _health_cache_lock = threading.Lock()
 _health_cache: Dict[str, Any] = {"expires_at": 0.0, "value": None}
-_gateway_semaphore = threading.Semaphore(max(1, int(getattr(settings, "LLM_MAX_CONCURRENCY", 3) or 3)))
+_gateway_semaphore = threading.Semaphore(max(1, int(getattr(settings, "LLM_MAX_CONCURRENCY", 1) or 1)))
+_endpoint_state_lock = threading.Lock()
+_endpoint_failures: Dict[str, int] = {}
+_endpoint_cooldowns: Dict[str, float] = {}
+_endpoint_last_error: Dict[str, str] = {}
+_endpoint_cooldown_base_seconds = max(
+    3,
+    int(getattr(settings, "OLLAMA_ENDPOINT_COOLDOWN_BASE_SECONDS", 6) or 6),
+)
+_endpoint_cooldown_max_seconds = max(
+    _endpoint_cooldown_base_seconds,
+    int(getattr(settings, "OLLAMA_ENDPOINT_COOLDOWN_MAX_SECONDS", 45) or 45),
+)
+_remote_timeout_cap_seconds = max(
+    30,
+    int(
+        getattr(settings, "OLLAMA_REMOTE_REQUEST_TIMEOUT_SECONDS", None)
+        or getattr(settings, "OLLAMA_REQUEST_TIMEOUT_SECONDS", 300)
+        or 300
+    ),
+)
+_transient_failure_markers = (
+    "1033",
+    "530",
+    "502",
+    "503",
+    "504",
+    "524",
+    "bad gateway",
+    "service unavailable",
+    "gateway timed out",
+    "timed out",
+    "forcibly closed",
+    "connection reset",
+    "connection aborted",
+    "protocolerror",
+)
 
 
 def normalize_base_url(value: Any) -> str:
@@ -91,15 +127,99 @@ def candidate_endpoints() -> List[Dict[str, Any]]:
     return candidates
 
 
+def _endpoint_cooldown_remaining(base_url: str) -> float:
+    normalized = normalize_base_url(base_url)
+    if not normalized:
+        return 0.0
+    with _endpoint_state_lock:
+        cooldown_until = float(_endpoint_cooldowns.get(normalized, 0.0) or 0.0)
+    return max(0.0, cooldown_until - time.time())
+
+
+def _is_transient_failure(error: Any) -> bool:
+    lower = compact_error_text(error).lower()
+    if not lower:
+        return False
+    return any(marker in lower for marker in _transient_failure_markers)
+
+
+def _mark_endpoint_failure(base_url: str, error: Any) -> None:
+    normalized = normalize_base_url(base_url)
+    if not normalized:
+        return
+    transient = _is_transient_failure(error)
+    error_text = compact_error_text(error)
+    lower = error_text.lower()
+    is_local = ("127.0.0.1" in normalized) or ("localhost" in normalized)
+    local_refused = is_local and any(
+        token in lower
+        for token in ("10061", "actively refused", "connection refused", "failed to establish a new connection")
+    )
+    with _endpoint_state_lock:
+        failure_count = min(8, int(_endpoint_failures.get(normalized, 0) or 0) + 1)
+        _endpoint_failures[normalized] = failure_count
+        if local_refused:
+            cooldown_seconds = min(_endpoint_cooldown_max_seconds, 60)
+        elif transient:
+            cooldown_seconds = min(
+                _endpoint_cooldown_max_seconds,
+                _endpoint_cooldown_base_seconds * (2 ** (failure_count - 1)),
+            )
+        else:
+            cooldown_seconds = min(_endpoint_cooldown_max_seconds, max(5, _endpoint_cooldown_base_seconds // 2))
+        _endpoint_cooldowns[normalized] = max(
+            float(_endpoint_cooldowns.get(normalized, 0.0) or 0.0),
+            time.time() + float(cooldown_seconds),
+        )
+        if error_text:
+            _endpoint_last_error[normalized] = error_text[:220]
+
+
+def _mark_endpoint_success(base_url: str) -> None:
+    normalized = normalize_base_url(base_url)
+    if not normalized:
+        return
+    with _endpoint_state_lock:
+        _endpoint_failures.pop(normalized, None)
+        _endpoint_cooldowns.pop(normalized, None)
+        _endpoint_last_error.pop(normalized, None)
+
+
+def _effective_request_timeout(base_url: str, timeout_seconds: Any) -> Any:
+    try:
+        resolved = max(5, int(timeout_seconds or 5))
+    except Exception:
+        resolved = 5
+    normalized = normalize_base_url(base_url).lower()
+    is_local = ("127.0.0.1" in normalized) or ("localhost" in normalized)
+    if not is_local:
+        resolved = min(resolved, _remote_timeout_cap_seconds)
+    connect_timeout = max(3, min(12, resolved // 3))
+    read_timeout = max(connect_timeout + 2, resolved)
+    return (connect_timeout, read_timeout)
+
+
 def ordered_endpoints() -> List[Dict[str, Any]]:
     candidates = candidate_endpoints()
     with _active_base_url_lock:
         active = _active_base_url
     if active:
         active = normalize_base_url(active)
+    ordered = candidates
     if active and any(item["url"] == active for item in candidates):
-        return [item for item in candidates if item["url"] == active] + [item for item in candidates if item["url"] != active]
-    return candidates
+        ordered = [item for item in candidates if item["url"] == active] + [item for item in candidates if item["url"] != active]
+
+    ready: List[Dict[str, Any]] = []
+    cooling: List[tuple[float, Dict[str, Any]]] = []
+    for item in ordered:
+        cooldown_remaining = _endpoint_cooldown_remaining(item["url"])
+        if cooldown_remaining > 0:
+            cooling.append((cooldown_remaining, item))
+        else:
+            ready.append(item)
+    if ready:
+        return ready + [item for _, item in sorted(cooling, key=lambda pair: pair[0])]
+    return [item for _, item in sorted(cooling, key=lambda pair: pair[0])]
 
 
 def remember_active_endpoint(base_url: str) -> None:
@@ -119,6 +239,8 @@ def friendly_endpoint_error(base_url: str, error: Any) -> str:
 
     if any(token in lower for token in ["10054", "forcibly closed", "connection reset", "connection aborted", "protocolerror"]):
         return f"{endpoint}: Remote host closed the connection unexpectedly."
+    if "1033" in lower or "530" in lower:
+        return f"{endpoint}: Tunnel DNS routing failed (Cloudflare 1033/530). Check OLLAMA_URL or use a local standby endpoint."
     if "524" in lower or "a timeout occurred" in lower:
         return f"{endpoint}: Gateway timed out while waiting for the LLM service."
     if "502" in lower or "bad gateway" in lower:
@@ -176,8 +298,6 @@ def _request_headers(base_url: str) -> Dict[str, str]:
         "Accept": "application/json",
         "User-Agent": "Hyzync-LLM-Gateway/1.0",
     }
-    if normalized.startswith("https://"):
-        headers["Connection"] = "close"
     return headers
 
 
@@ -186,7 +306,7 @@ def _request_vllm_completion(
     model: str,
     prompt: str,
     num_predict: int,
-    timeout_seconds: int,
+    timeout_seconds: Any,
     *,
     system_prompt: Optional[str] = None,
     temperature: float = 0.05,
@@ -220,7 +340,7 @@ def _request_ollama_completion(
     model: str,
     prompt: str,
     num_predict: int,
-    timeout_seconds: int,
+    timeout_seconds: Any,
     response_format: Optional[str],
     num_ctx: Optional[int],
     *,
@@ -251,12 +371,6 @@ def _request_ollama_completion(
     response.raise_for_status()
     data = response.json()
     text = str(data.get("response") or "").strip()
-    if not text and response_format:
-        payload.pop("format", None)
-        response = _session.post(url, json=payload, timeout=timeout_seconds, headers=_request_headers(base_url))
-        response.raise_for_status()
-        data = response.json()
-        text = str(data.get("response") or "").strip()
     if not text:
         raise RuntimeError("LLM returned an empty response.")
     return {
@@ -292,20 +406,28 @@ def request_completion(
     for attempt in range(retry_count):
         if stop_event is not None and getattr(stop_event, "is_set", lambda: False)():
             break
-        for endpoint in ordered_endpoints():
+        endpoint_plan = ordered_endpoints()
+        attempted_any = False
+        for endpoint in endpoint_plan:
             if stop_event is not None and getattr(stop_event, "is_set", lambda: False)():
                 break
             base_url = endpoint["url"]
+            cooldown_remaining = _endpoint_cooldown_remaining(base_url)
+            if cooldown_remaining > 0:
+                endpoint_errors.append(f"{base_url}: Endpoint cooling down for {int(round(cooldown_remaining))}s.")
+                continue
             last_url = base_url
+            effective_timeout = _effective_request_timeout(base_url, timeout_value)
             with _gateway_semaphore:
                 try:
+                    attempted_any = True
                     if endpoint["transport"] == "vllm":
                         result = _request_vllm_completion(
                             base_url,
                             selected_model,
                             prompt,
                             num_predict,
-                            timeout_value,
+                            effective_timeout,
                             system_prompt=system_prompt,
                             temperature=temperature,
                             top_p=top_p,
@@ -316,13 +438,14 @@ def request_completion(
                             selected_model,
                             prompt,
                             num_predict,
-                            timeout_value,
+                            effective_timeout,
                             response_format,
                             num_ctx,
                             system_prompt=system_prompt,
                             temperature=temperature,
                             top_p=top_p,
                         )
+                    _mark_endpoint_success(base_url)
                     remember_active_endpoint(base_url)
                     return {
                         "ok": True,
@@ -335,13 +458,25 @@ def request_completion(
                         "fallback_used": endpoint["role"] != "primary",
                     }
                 except Exception as error:
+                    error_str = str(error)
+                    is_empty_response = "LLM returned an empty response" in error_str
                     friendly_error = friendly_endpoint_error(base_url, error)
                     raw_error = f"{base_url}: {compact_error_text(error)}"
+                    # Don't penalize the endpoint for empty model responses —
+                    # it's a model capacity issue, not a connectivity failure.
+                    if not is_empty_response:
+                        _mark_endpoint_failure(base_url, error)
                     endpoint_errors.append(friendly_error)
                     raw_endpoint_errors.append(raw_error)
                     if endpoint["role"] == "primary" and not primary_error:
                         primary_error = friendly_error
                         primary_raw_error = raw_error
+                    # Empty model response: don't waste time trying fallback
+                    # endpoints — they won't fix a model capacity issue.
+                    if is_empty_response:
+                        break
+        if not attempted_any and endpoint_plan:
+            break
         if attempt < retry_count - 1 and endpoint_errors:
             backoff_seconds = min(6, 2 ** attempt)
             logger.info("Retrying LLM request (%s/%s) after errors: %s", attempt + 2, retry_count, _dedupe_errors(endpoint_errors, 2))
@@ -397,9 +532,24 @@ def probe_connectivity(
     endpoint_rows: List[Dict[str, Any]] = []
     successful_endpoint: Optional[Dict[str, Any]] = None
 
-    for endpoint in ordered_endpoints():
+    endpoint_plan = ordered_endpoints()
+    for endpoint in endpoint_plan:
         base_url = endpoint["url"]
+        cooldown_remaining = _endpoint_cooldown_remaining(base_url)
+        if cooldown_remaining > 0:
+            endpoint_rows.append(
+                {
+                    **endpoint,
+                    "status": "standby",
+                    "active": False,
+                    "latency": None,
+                    "error": "",
+                    "cooldown_seconds": int(round(cooldown_remaining)),
+                }
+            )
+            continue
         endpoint_started = time.time()
+        effective_timeout = _effective_request_timeout(base_url, request_timeout)
         try:
             with _gateway_semaphore:
                 if endpoint["transport"] == "vllm":
@@ -408,7 +558,7 @@ def probe_connectivity(
                         selected_model,
                         effective_probe_prompt,
                         64,
-                        request_timeout,
+                        effective_timeout,
                         temperature=0.0,
                         top_p=1.0,
                     )
@@ -419,7 +569,7 @@ def probe_connectivity(
                         selected_model,
                         effective_probe_prompt,
                         64,
-                        request_timeout,
+                        effective_timeout,
                         "json",
                         effective_num_ctx,
                         temperature=0.0,
@@ -429,6 +579,7 @@ def probe_connectivity(
             parsed = _parse_probe_json(probe_response)
             if not isinstance(parsed, dict):
                 raise RuntimeError("Probe response JSON was not an object.")
+            _mark_endpoint_success(base_url)
             remember_active_endpoint(base_url)
             successful_endpoint = endpoint
             endpoint_rows.append(
@@ -438,12 +589,14 @@ def probe_connectivity(
                     "active": True,
                     "latency": round(time.time() - endpoint_started, 2),
                     "error": "",
+                    "cooldown_seconds": 0,
                 }
             )
             break
         except Exception as error:
             friendly_error = friendly_endpoint_error(base_url, error)
             raw_error = f"{base_url}: {compact_error_text(error)}"
+            _mark_endpoint_failure(base_url, error)
             endpoint_errors.append(friendly_error)
             raw_endpoint_errors.append(raw_error)
             if endpoint["role"] == "primary" and not primary_error:
@@ -456,6 +609,7 @@ def probe_connectivity(
                     "active": False,
                     "latency": round(time.time() - endpoint_started, 2),
                     "error": friendly_error,
+                    "cooldown_seconds": int(round(_endpoint_cooldown_remaining(base_url))),
                 }
             )
 
@@ -470,6 +624,7 @@ def probe_connectivity(
                 "active": False,
                 "latency": None,
                 "error": "",
+                "cooldown_seconds": int(round(_endpoint_cooldown_remaining(endpoint["url"]))),
             }
         )
 
@@ -492,7 +647,13 @@ def probe_connectivity(
         if endpoint_errors:
             result["warning"] = _dedupe_errors(endpoint_errors)
     else:
-        final_error = primary_error or _dedupe_errors(endpoint_errors) or "No LLM endpoint candidates configured."
+        all_cooling = bool(endpoint_rows) and all(
+            int(row.get("cooldown_seconds", 0) or 0) > 0 for row in endpoint_rows
+        )
+        if all_cooling:
+            final_error = "LLM endpoints are cooling down after recent failures. Retry in a few seconds."
+        else:
+            final_error = primary_error or _dedupe_errors(endpoint_errors) or "No LLM endpoint candidates configured."
         result = {
             "ok": False,
             "status": "error",

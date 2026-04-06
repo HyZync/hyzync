@@ -28,79 +28,95 @@ class UniversalFeedback(BaseModel):
 # ── Connector Mapping Layer ──────────────────────────────────────────────────
 
 def map_playstore(raw: dict) -> UniversalFeedback:
+    created_at = raw.get("cxm_reviewed_at") or raw.get("reviewed_at") or raw.get("at") or raw.get("date") or raw.get("created_at")
     return UniversalFeedback(
         feedback_text=raw.get("content") or raw.get("review_text", ""),
         rating=raw.get("score") or raw.get("star_rating"),
         customer_identifier=raw.get("userName") or raw.get("username"),
-        source="playstore",
+        source=raw.get("cxm_source_name") or "playstore",
         source_type="app_review",
+        created_at=str(created_at) if created_at else None,
         metadata_json={k: v for k, v in raw.items() if k not in ["content", "review_text", "score", "star_rating", "userName", "username"]}
     )
 
 def map_appstore(raw: dict) -> UniversalFeedback:
+    created_at = raw.get("cxm_reviewed_at") or raw.get("reviewed_at") or raw.get("at") or raw.get("date") or raw.get("created_at")
     return UniversalFeedback(
         feedback_text=raw.get("content", ""),
         rating=raw.get("score") or raw.get("rating"),
         customer_identifier=raw.get("author"),
-        source="appstore",
+        source=raw.get("cxm_source_name") or "appstore",
         source_type="app_review",
+        created_at=str(created_at) if created_at else None,
         metadata_json={k: v for k, v in raw.items() if k not in ["content", "score", "rating", "author"]}
     )
 
 def map_trustpilot(raw: dict) -> UniversalFeedback:
+    created_at = raw.get("cxm_reviewed_at") or raw.get("reviewed_at") or raw.get("at") or raw.get("date") or raw.get("created_at")
     return UniversalFeedback(
         feedback_text=raw.get("review", ""),
         rating=raw.get("stars"),
         customer_identifier=raw.get("reviewer_name"),
-        source="trustpilot",
+        source=raw.get("cxm_source_name") or "trustpilot",
         source_type="review",
+        created_at=str(created_at) if created_at else None,
         metadata_json={k: v for k, v in raw.items() if k not in ["review", "stars", "reviewer_name"]}
     )
 
 def map_surveymonkey(raw: dict) -> UniversalFeedback:
+    created_at = raw.get("cxm_reviewed_at") or raw.get("submitted_at") or raw.get("created_at") or raw.get("at")
     return UniversalFeedback(
         feedback_text=raw.get("response", ""),
         customer_identifier=raw.get("respondent_email"),
-        source="surveymonkey",
+        source=raw.get("cxm_source_name") or "surveymonkey",
         source_type="survey",
+        created_at=str(created_at) if created_at else None,
         metadata_json={k: v for k, v in raw.items() if k not in ["response", "respondent_email"]}
     )
 
 def map_typeform(raw: dict) -> UniversalFeedback:
+    created_at = raw.get("cxm_reviewed_at") or raw.get("submitted_at") or raw.get("created_at") or raw.get("at")
     return UniversalFeedback(
         feedback_text=raw.get("answer", ""),
         customer_identifier=raw.get("email"),
-        source="typeform",
+        source=raw.get("cxm_source_name") or "typeform",
         source_type="survey",
+        created_at=str(created_at) if created_at else None,
         metadata_json={k: v for k, v in raw.items() if k not in ["answer", "email"]}
     )
 
 def map_salesforce(raw: dict) -> UniversalFeedback:
+    created_at = raw.get("cxm_reviewed_at") or raw.get("created_at") or raw.get("at") or raw.get("date")
     return UniversalFeedback(
         feedback_text=raw.get("ticket_body", ""),
         customer_identifier=raw.get("email"),
-        source="salesforce",
+        source=raw.get("cxm_source_name") or "salesforce",
         source_type="support_ticket",
+        created_at=str(created_at) if created_at else None,
         metadata_json={k: v for k, v in raw.items() if k not in ["ticket_body", "email"]}
     )
 
 def map_csv(raw: dict) -> UniversalFeedback:
+    created_at = raw.get("cxm_reviewed_at") or raw.get("created_at") or raw.get("at") or raw.get("date")
     return UniversalFeedback(
         feedback_text=raw.get("feedback_text", raw.get("content", "")),
         rating=raw.get("rating", raw.get("score")),
         customer_identifier=raw.get("customer", raw.get("email")),
-        source="csv_upload",
+        source=raw.get("cxm_source_name") or "csv_upload",
         source_type="csv",
+        created_at=str(created_at) if created_at else None,
         metadata_json={k: v for k, v in raw.items() if k not in ["feedback_text", "content", "rating", "score", "customer", "email"]}
     )
 
 def map_api(raw: dict) -> UniversalFeedback:
+    created_at = raw.get("cxm_reviewed_at") or raw.get("created_at") or raw.get("at") or raw.get("date")
     return UniversalFeedback(
         feedback_text=raw.get("text", ""),
         rating=raw.get("rating"),
         customer_identifier=raw.get("user_id"),
-        source="generic_api",
+        source=raw.get("cxm_source_name") or "generic_api",
         source_type="api",
+        created_at=str(created_at) if created_at else None,
         metadata_json={k: v for k, v in raw.items() if k not in ["text", "rating", "user_id"]}
     )
 
@@ -193,6 +209,7 @@ def process_feedback(tenant_id: int, connector_type: str, raw_payload: dict) -> 
         metadata_json=json.dumps(uf.metadata_json),
         customer_identifier=uf.customer_identifier,
         priority=priority,
+        created_at=uf.created_at,
     )
     
     # 5: Assign issue_id

@@ -26,9 +26,36 @@ import Contact from './Contact';
 import { useHorizonAvailabilityNotice } from './HorizonAvailabilityNoticeProvider';
 
 const quickStats = [
-    ['7+', 'sources connected'],
-    ['<24h', 'to team action'],
-    ['1 view', 'for every team']
+    ['5%+', 'retention lift targeted'],
+    ['75%', 'revenue upside potential'],
+    ['<24h', 'to team action']
+];
+
+const heroHighlights = [
+    'One unified customer timeline',
+    'Early churn alerts',
+    'Fast team action'
+];
+
+const retentionImpactPoints = [
+    {
+        title: 'Unified Signals',
+        value: '8 live sources',
+        copy: 'Reviews, CRM, support, and surveys in one view.',
+        fill: '82%'
+    },
+    {
+        title: 'Churn Response',
+        value: '<24h action',
+        copy: 'Critical issues routed instantly to the right team.',
+        fill: '74%'
+    },
+    {
+        title: 'Revenue Impact',
+        value: 'Up to +75%',
+        copy: 'A 5% retention lift can compound revenue growth.',
+        fill: '68%'
+    }
 ];
 
 const integrations = [
@@ -106,18 +133,18 @@ const PreviewLogoArtwork = ({ logo }) => {
 
 const coreCards = [
     {
-        title: 'Unify feedback',
-        copy: 'Bring reviews, tickets, CRM, and surveys into one place.',
+        title: 'Know customers clearly',
+        copy: 'Unify reviews, support, CRM, and surveys into one customer truth.',
         icon: Layers
     },
     {
-        title: 'Spot risk fast',
-        copy: 'See churn signals, recurring issues, and rising friction early.',
+        title: 'Act quickly on risk',
+        copy: 'Surface churn signals, recurring friction, and renewal blockers early.',
         icon: ShieldAlert
     },
     {
-        title: 'Drive action',
-        copy: 'Show product, support, and growth exactly what to do next.',
+        title: 'Protect recurring revenue',
+        copy: 'Give product, support, and growth teams a shared retention action plan.',
         icon: Target
     }
 ];
@@ -143,21 +170,21 @@ const summaryToneStyles = {
 const summaryCards = [
     {
         label: 'Unified signals',
-        value: 'Reviews, support, CRM, surveys, and uploads',
+        value: 'Reviews, support, CRM, surveys, and subscriptions',
         meta: '8 live feeds',
         tone: 'cyan',
         icon: Layers
     },
     {
-        label: 'Top issue',
-        value: 'Onboarding friction increasing across channels',
+        label: 'Top churn driver',
+        value: 'Onboarding and feature-gap friction rising across channels',
         meta: 'Escalating',
         tone: 'amber',
         icon: ShieldAlert
     },
     {
-        label: 'Next output',
-        value: 'One action brief for every team',
+        label: 'Next best action',
+        value: 'One retention brief with team-level ownership',
         meta: 'Auto-routed',
         tone: 'emerald',
         icon: Workflow
@@ -166,22 +193,22 @@ const summaryCards = [
 
 const previewSignalPills = ['Reviews', 'Support', 'CRM'];
 
-const riskTrendTags = ['Onboarding', 'Billing', 'Support lag'];
+const riskTrendTags = ['Onboarding', 'Feature gaps', 'Support lag'];
 
 const steps = [
     {
         title: 'Connect',
-        copy: 'Sync the sources your customers already use.',
+        copy: 'Sync the channels where subscribers share feedback.',
         icon: Layers
     },
     {
         title: 'Analyze',
-        copy: 'Horizon groups patterns and ranks what matters.',
+        copy: 'Horizon groups root problems and ranks impact by churn risk.',
         icon: BarChart2
     },
     {
         title: 'Act',
-        copy: 'Teams move from one shared priority list.',
+        copy: 'Teams execute from one shared priority list and close the loop faster.',
         icon: Workflow
     }
 ];
@@ -218,10 +245,10 @@ const feedbackMainProblem = {
 };
 
 const teamCards = [
-    ['Product', 'Prioritize roadmap work that improves adoption and retention.'],
-    ['Support', 'Catch repeating pain before it becomes ticket volume.'],
-    ['Growth', 'Trigger rescue and lifecycle action from real signals.'],
-    ['Leadership', 'Get one clean view of customer truth across the business.']
+    ['Product', 'Prioritize roadmap work that removes churn drivers and feature gaps.'],
+    ['Support', 'Catch recurring pain quickly and resolve issues before renewals fail.'],
+    ['Growth', 'Trigger rescue and lifecycle actions from real customer risk signals.'],
+    ['Leadership', 'Monitor retention impact and recurring revenue exposure in one place.']
 ];
 
 const bars = [24, 36, 48, 44, 61, 74, 66, 84];
@@ -248,6 +275,128 @@ const Home = () => {
             <div className="pointer-events-none absolute right-[-56px] top-16 h-80 w-80 rounded-full bg-blue-300/28 blur-[140px]" />
             <div className="pointer-events-none absolute left-[42%] top-28 h-64 w-64 rounded-full bg-emerald-200/22 blur-[130px]" />
 
+            <div className="relative px-4 pt-16 md:hidden">
+                <motion.section
+                    initial={{ opacity: 0, y: 14 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.45 }}
+                    className="rounded-[30px] border border-slate-200 bg-white/95 p-5 shadow-[0_24px_60px_-45px_rgba(15,23,42,0.28)]"
+                >
+                    <div className="inline-flex items-center gap-2 rounded-full border border-cyan-200 bg-cyan-50 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-cyan-700">
+                        <Sparkles size={12} />
+                        Unified Feedback Intelligence
+                    </div>
+
+                    <h1 className="mt-4 text-[34px] font-semibold leading-[0.95] tracking-tight text-slate-950">
+                        Know customers.
+                        <br />
+                        Retain subscribers.
+                    </h1>
+
+                    <p className="mt-4 text-sm leading-relaxed text-slate-600">
+                        Built for subscription brands to unify feedback and act fast on churn signals.
+                    </p>
+
+                    <div className="mt-4 inline-flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-amber-700">
+                        <Lock size={12} />
+                        Horizon Available Soon
+                    </div>
+
+                    <div className="mt-5 flex flex-col gap-2.5">
+                        <button
+                            onClick={openHorizonAvailabilityNotice}
+                            className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-slate-950 px-5 py-3 text-sm font-semibold text-white"
+                        >
+                            <Lock size={14} />
+                            Horizon Available Soon
+                        </button>
+                        <button
+                            onClick={() => navigate('/#contact')}
+                            className="inline-flex w-full items-center justify-center rounded-full border border-slate-300 bg-white px-5 py-3 text-sm font-semibold text-slate-700"
+                        >
+                            Join waitlist
+                        </button>
+                    </div>
+                </motion.section>
+
+                <section className="mt-4 rounded-[30px] border border-slate-200 bg-white/95 p-4 shadow-[0_24px_60px_-45px_rgba(15,23,42,0.24)]">
+                    <div className={`relative overflow-hidden rounded-[24px] border border-slate-200 bg-gradient-to-br ${activePreviewLogo.gradient} p-4`}>
+                        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.72),transparent_44%)]" />
+                        <div className="relative z-10">
+                            <div className="flex items-center justify-between gap-2">
+                                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-700">Live feedback stream</p>
+                                <span className="rounded-full border border-white/60 bg-white/80 px-2.5 py-1 text-[10px] font-semibold text-emerald-700">
+                                    {activePreviewLogo.name}
+                                </span>
+                            </div>
+                            <div className="mt-4 flex items-center justify-center">
+                                <div className="flex h-[132px] w-[132px] items-center justify-center rounded-[28px] border border-white/70 bg-white/88 p-4 shadow-[0_22px_45px_-36px_rgba(15,23,42,0.42)]">
+                                    <PreviewLogoArtwork logo={activePreviewLogo} />
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="mt-3 flex flex-wrap gap-2">
+                        {heroHighlights.map((item) => (
+                            <span key={item} className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-700">
+                                {item}
+                            </span>
+                        ))}
+                    </div>
+                </section>
+
+                <section className="mt-4 grid grid-cols-3 gap-2">
+                    {quickStats.map(([value, label]) => (
+                        <div key={value} className="rounded-2xl border border-slate-200 bg-white p-3 shadow-[0_20px_35px_-36px_rgba(15,23,42,0.4)]">
+                            <p className="text-xl font-semibold leading-none text-slate-950">{value}</p>
+                            <p className="mt-2 text-[11px] leading-tight text-slate-500">{label}</p>
+                        </div>
+                    ))}
+                </section>
+
+                <section className="mt-4 rounded-[30px] border border-slate-200 bg-white p-4 shadow-[0_24px_60px_-45px_rgba(15,23,42,0.24)]">
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-cyan-700">How it works</p>
+                    <h2 className="mt-2 text-xl font-semibold leading-tight text-slate-950">Clear path from feedback to action</h2>
+
+                    <div className="mt-4 space-y-2.5">
+                        {steps.map((step, idx) => {
+                            const Icon = step.icon;
+
+                            return (
+                                <article key={step.title} className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-3.5 py-3">
+                                    <div className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-white text-cyan-700 shadow-sm">
+                                        <Icon size={15} />
+                                    </div>
+                                    <div className="min-w-0">
+                                        <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
+                                            Step {idx + 1}
+                                        </p>
+                                        <p className="mt-1 text-sm font-semibold text-slate-900">{step.title}</p>
+                                        <p className="mt-1 text-xs leading-relaxed text-slate-600">{step.copy}</p>
+                                    </div>
+                                </article>
+                            );
+                        })}
+                    </div>
+                </section>
+
+                <section className="mt-4 rounded-[30px] border border-slate-200 bg-white p-4 shadow-[0_24px_60px_-45px_rgba(15,23,42,0.24)]">
+                    <div className="flex items-center justify-between">
+                        <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-cyan-700">Integrations</p>
+                        <span className="text-xs font-semibold text-slate-500">Live sources</span>
+                    </div>
+                    <div className="mt-3 grid grid-cols-4 gap-2">
+                        {integrations.slice(0, 8).map((item) => (
+                            <div key={item.name} className="flex h-14 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 p-2">
+                                <img src={item.image} alt={item.name} className="max-h-7 w-auto max-w-full object-contain" />
+                            </div>
+                        ))}
+                    </div>
+                </section>
+            </div>
+
+            <div className="hidden md:block">
             <section className="relative px-6 pt-20 md:pt-24 xl:px-8">
                 <div className="mx-auto max-w-[1760px]">
                     <div className="grid items-center gap-12 xl:grid-cols-[0.82fr_1.18fr]">
@@ -259,19 +408,21 @@ const Home = () => {
                         >
                             <div className="inline-flex items-center gap-2 rounded-full border border-cyan-200 bg-cyan-50 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-cyan-700">
                                 <Sparkles size={14} />
-                                AI Feedback Intelligence Platform
+                                Unified Feedback Intelligence Platform
                             </div>
 
                             <h1 className="mt-8 text-5xl font-semibold leading-[0.95] tracking-tight text-slate-950 sm:text-6xl xl:text-[84px]">
-                                Customer feedback, turned into action.
+                                Know your customers.
+                                <br />
+                                Act on feedback quickly.
                             </h1>
 
                             <p className="mt-6 max-w-2xl text-lg leading-relaxed text-slate-600 md:text-xl">
-                                Horizon unifies reviews, tickets, CRM notes, and survey feedback so your team can spot churn risk, prioritize issues, and act faster.
+                                Built for subscription brands to unify feedback, spot churn early, and act fast.
                             </p>
 
-                            <p className="mt-4 max-w-2xl text-base leading-relaxed text-slate-500 md:text-lg">
-                                Built for subscription brands, it gives product, support, and growth teams one clear operating view without the reporting overhead.
+                            <p className="mt-4 inline-flex items-center gap-2 rounded-full border border-cyan-200 bg-cyan-50 px-4 py-2 text-sm font-semibold text-cyan-800">
+                                A 5% retention lift can drive up to 75% revenue growth.
                             </p>
 
                             <div className="mt-8 flex flex-wrap gap-4">
@@ -280,7 +431,7 @@ const Home = () => {
                                     className="group inline-flex items-center gap-2 rounded-full bg-slate-950 px-7 py-3.5 text-sm font-bold text-white transition-all hover:bg-slate-800"
                                 >
                                     {isHorizonLocked && <Lock size={15} />}
-                                    Preview Horizon
+                                    {isHorizonLocked ? 'Horizon Available Soon' : 'Preview Horizon'}
                                     <ArrowRight size={16} className="transition-transform group-hover:translate-x-1" />
                                 </button>
                                 <button
@@ -300,9 +451,21 @@ const Home = () => {
                                 ))}
                             </div>
 
+                            <div className="mt-5 flex flex-wrap gap-2.5">
+                                {heroHighlights.map((item) => (
+                                    <div
+                                        key={item}
+                                        className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-[0_18px_40px_-36px_rgba(15,23,42,0.35)]"
+                                    >
+                                        <span className="h-2 w-2 rounded-full bg-emerald-500 shadow-[0_0_0_4px_rgba(16,185,129,0.15)]" />
+                                        <span>{item}</span>
+                                    </div>
+                                ))}
+                            </div>
+
                             <div className="mt-6 inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm text-slate-600">
                                 <CheckCircle2 size={16} className="text-emerald-500" />
-                                Built for product, support, growth, and leadership teams
+                                Built for subscription-first product, support, growth, and leadership teams
                             </div>
                         </motion.div>
 
@@ -430,7 +593,7 @@ const Home = () => {
                                                 <div className="max-w-[24ch]">
                                                     <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Risk trend</p>
                                                     <p className="mt-2 text-sm font-semibold leading-relaxed text-slate-800">
-                                                        Onboarding and billing friction are rising together.
+                                                        Onboarding and feature gaps are rising together in churn feedback.
                                                     </p>
                                                 </div>
 
@@ -478,6 +641,47 @@ const Home = () => {
             </section>
 
             <section className="relative mt-12 px-6 xl:px-8">
+                <div className="relative mx-auto max-w-[1760px] overflow-hidden rounded-[34px] border border-slate-200 bg-[linear-gradient(170deg,rgba(255,255,255,0.99),rgba(236,252,255,0.95))] p-6 shadow-[0_30px_80px_-56px_rgba(14,116,144,0.45)] md:p-7">
+                    <div className="pointer-events-none absolute left-0 top-0 h-40 w-40 rounded-full bg-cyan-200/35 blur-[100px]" />
+                    <div className="pointer-events-none absolute right-4 top-8 h-40 w-40 rounded-full bg-emerald-200/35 blur-[100px]" />
+
+                    <div className="relative grid gap-5 lg:grid-cols-[0.82fr_1.18fr] lg:items-end">
+                        <div className="max-w-2xl">
+                            <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-cyan-700">Retention impact</p>
+                            <h2 className="mt-3 text-3xl font-semibold leading-tight text-slate-950 md:text-5xl">
+                                Retention growth in one glance.
+                            </h2>
+                            <p className="mt-4 text-sm leading-relaxed text-slate-600 md:text-base">
+                                Clean signals. Faster fixes. Better renewals.
+                            </p>
+                        </div>
+                        <div className="rounded-[22px] border border-cyan-200 bg-white/90 p-4 text-sm leading-relaxed text-slate-700 shadow-[0_24px_50px_-44px_rgba(14,116,144,0.45)]">
+                            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-cyan-700">Revenue truth</p>
+                            <p className="mt-2 text-base font-semibold text-slate-950">
+                                A 5% improvement in retention can boost revenue by up to 75%.
+                            </p>
+                        </div>
+                    </div>
+
+                    <div className="relative mt-6 grid gap-4 md:grid-cols-3">
+                        {retentionImpactPoints.map(({ title, value, copy, fill }) => (
+                            <article key={title} className="rounded-[26px] border border-slate-200 bg-white/95 p-5 shadow-[0_24px_50px_-44px_rgba(15,23,42,0.35)]">
+                                <p className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-500">{title}</p>
+                                <p className="mt-3 text-2xl font-semibold tracking-tight text-slate-950">{value}</p>
+                                <p className="mt-2 text-sm leading-relaxed text-slate-700">{copy}</p>
+                                <div className="mt-4 h-2 rounded-full bg-slate-100">
+                                    <div
+                                        className="h-full rounded-full bg-gradient-to-r from-cyan-500 via-sky-400 to-emerald-400"
+                                        style={{ width: fill }}
+                                    />
+                                </div>
+                            </article>
+                        ))}
+                    </div>
+                </div>
+            </section>
+
+            <section className="relative mt-12 px-6 xl:px-8">
                 <div className="relative mx-auto max-w-[1760px] overflow-hidden rounded-[34px] border border-slate-200 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(244,250,255,0.92))] p-5 shadow-[0_28px_80px_-52px_rgba(15,23,42,0.24)] md:p-6">
                     <div className="pointer-events-none absolute left-10 top-16 h-40 w-40 rounded-full bg-cyan-200/26 blur-[90px]" />
                     <div className="pointer-events-none absolute right-10 top-12 h-48 w-48 rounded-full bg-blue-200/22 blur-[110px]" />
@@ -487,15 +691,15 @@ const Home = () => {
                             <div className="max-w-2xl">
                                 <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-cyan-700">Feedback intelligence demo</p>
                                 <h2 className="mt-3 text-2xl font-semibold leading-tight text-slate-950 md:text-4xl">
-                                    One unhappy subscriber, translated into clear action for the team.
+                                    One unhappy subscriber turned into a precise retention action plan.
                                 </h2>
                                 <p className="mt-3 text-sm leading-relaxed text-slate-600 md:text-base">
-                                    Horizon turns one review into structured signals your team can act on without reading every comment manually.
+                                    One review in, clear action out.
                                 </p>
                             </div>
 
                             <div className="rounded-[24px] border border-slate-200 bg-white/82 px-4 py-3 text-sm leading-relaxed text-slate-600 lg:justify-self-end lg:max-w-[720px]">
-                                Product and support teams get the theme, sentiment, urgency, problem, and impact in one compact view.
+                                Theme, urgency, owner, and impact in one compact card.
                             </div>
                         </div>
 
@@ -700,7 +904,7 @@ const Home = () => {
                                                 className="inline-flex shrink-0 items-center justify-center self-start rounded-full bg-slate-950 px-4 py-2 text-xs font-semibold text-white transition-colors hover:bg-slate-800 sm:self-auto"
                                             >
                                                 {isHorizonLocked && <Lock size={13} className="mr-1.5" />}
-                                                Generate
+                                                {isHorizonLocked ? 'Available Soon' : 'Generate'}
                                             </button>
                                             </div>
                                         </div>
@@ -738,13 +942,13 @@ const Home = () => {
                         <div className="w-full max-w-[880px]">
                             <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-cyan-700">What Horizon does</p>
                             <h2 className="mt-4 text-3xl font-semibold leading-tight text-slate-950 md:text-5xl">
-                                Unify feedback. Find risk. Drive action.
+                                Unify feedback. Know customers. Improve retention.
                             </h2>
                         </div>
 
                         <div className="rounded-[28px] border border-slate-200 bg-slate-50 p-5 lg:ml-auto lg:max-w-[760px]">
                             <p className="text-sm leading-relaxed text-slate-600">
-                                For subscription brands, Horizon is the world&apos;s simplest platform to unify customer feedback with easy integrations, quick analysis, and actionable reports powered by agentic AI.
+                                For subscription teams: collect signals, extract real problems, and execute before churn happens.
                             </p>
                         </div>
                     </div>
@@ -784,9 +988,9 @@ const Home = () => {
 
                         <div className="mt-8 space-y-4">
                             {[
-                                'Collect feedback from every customer touchpoint',
-                                'See the issues affecting churn, experience, and adoption',
-                                'Give each team one clear list of next actions'
+                                'Collect feedback from every customer touchpoint in one feed',
+                                'Identify churn drivers with clear root-cause and urgency context',
+                                'Launch team-specific actions and track retention impact quickly'
                             ].map((item) => (
                                 <div key={item} className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
                                     <CheckCircle2 size={18} className="mt-0.5 shrink-0 text-emerald-500" />
@@ -801,7 +1005,7 @@ const Home = () => {
                                 className="group inline-flex items-center gap-2 rounded-full bg-slate-950 px-6 py-3 text-sm font-bold text-white transition-all hover:bg-slate-800"
                             >
                                 {isHorizonLocked && <Lock size={15} />}
-                                Explore the product
+                                {isHorizonLocked ? 'Horizon Available Soon' : 'Explore the product'}
                                 <ArrowRight size={16} className="transition-transform group-hover:translate-x-1" />
                             </button>
                             <button
@@ -884,6 +1088,7 @@ const Home = () => {
                     </div>
                 </div>
             </section>
+            </div>
 
             <Contact />
         </div>

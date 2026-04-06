@@ -2077,7 +2077,7 @@ def save_user_connector(
     cursor = conn.cursor()
 
     scope_value = connector_scope or 'workspace'
-    valid_intervals = {'manual', 'hourly', 'daily', 'weekly'}
+    valid_intervals = {'manual', 'hourly', 'daily', 'weekly', 'on_new'}
     fetch_interval = (fetch_interval or 'daily').strip().lower()
     if fetch_interval not in valid_intervals:
         fetch_interval = 'daily'
@@ -2128,13 +2128,763 @@ def save_user_connector(
     conn.close()
     return source_id
 
-def delete_user_connector(connector_id: int, tenant_id: int):
-    """Soft delete a connector from cxm_sources, scoped by tenant."""
+def _table_exists(cursor, table_name: str) -> bool:
+    cursor.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+        (table_name,),
+    )
+    return cursor.fetchone() is not None
+
+
+def _delete_rows_by_ids(cursor, table_name: str, column_name: str, row_ids: List[int]) -> int:
+    if not row_ids or not _table_exists(cursor, table_name):
+        return 0
+    placeholders = ",".join("?" * len(row_ids))
+    cursor.execute(
+        f"DELETE FROM {table_name} WHERE {column_name} IN ({placeholders})",
+        row_ids,
+    )
+    return cursor.rowcount or 0
+
+
+def _delete_rows_with_params(cursor, table_name: str, where_clause: str, params: tuple = ()) -> int:
+    if not _table_exists(cursor, table_name):
+        return 0
+    cursor.execute(f"DELETE FROM {table_name} WHERE {where_clause}", params)
+    return cursor.rowcount or 0
+
+
+def _update_source_id_lists(cursor, table_name: str, tenant_id: int, removed_source_id: int) -> Dict[str, int]:
+    if not _table_exists(cursor, table_name):
+        return {"deleted": 0, "updated": 0}
+
+    cursor.execute(
+        f"SELECT id, source_ids_json FROM {table_name} WHERE tenant_id = ?",
+        (tenant_id,),
+    )
+    delete_ids: List[int] = []
+    update_rows: List[tuple] = []
+    for row in cursor.fetchall():
+        raw_ids = row["source_ids_json"]
+        try:
+            parsed_ids = json.loads(raw_ids or "[]")
+        except Exception:
+            parsed_ids = []
+        if not isinstance(parsed_ids, list):
+            parsed_ids = []
+
+        normalized_ids: List[int] = []
+        for value in parsed_ids:
+            try:
+                normalized_ids.append(int(str(value).strip()))
+            except (TypeError, ValueError):
+                continue
+
+        if removed_source_id not in normalized_ids:
+            continue
+
+        remaining_ids = [value for value in normalized_ids if value != removed_source_id]
+        if remaining_ids:
+            update_rows.append((json.dumps(remaining_ids), row["id"]))
+        else:
+            delete_ids.append(row["id"])
+
+    updated = 0
+    if update_rows:
+        cursor.executemany(
+            f"UPDATE {table_name} SET source_ids_json = ? WHERE id = ?",
+            update_rows,
+        )
+        updated = cursor.rowcount or 0
+
+    deleted = _delete_rows_by_ids(cursor, table_name, "id", delete_ids)
+    return {"deleted": deleted, "updated": updated}
+
+
+def _collect_feedback_ids_for_connector(
+    cursor,
+    tenant_id: int,
+    connector_id: int,
+    connector: Optional[Dict[str, Any]] = None,
+) -> List[int]:
+    if not _table_exists(cursor, "fi_feedback"):
+        return []
+
+    source_type = str((connector or {}).get("source_type") or "").strip().lower()
+    identifier = str((connector or {}).get("identifier") or "").strip()
+    display_name = str((connector or {}).get("display_name") or "").strip()
+
+    source_labels: set[str] = set()
+    for value in (display_name, identifier):
+        normalized = str(value or "").strip()
+        if normalized:
+            source_labels.add(normalized.lower())
+    if display_name and identifier and display_name.lower() != identifier.lower():
+        source_labels.add(f"{display_name} ({identifier})".strip().lower())
+
+    review_fingerprints: set[tuple[str, str]] = set()
+    if _table_exists(cursor, "cxm_reviews"):
+        cursor.execute(
+            """
+            SELECT content, reviewed_at
+            FROM cxm_reviews
+            WHERE tenant_id = ? AND source_id = ?
+            """,
+            (tenant_id, connector_id),
+        )
+        for review_row in cursor.fetchall():
+            content = str(review_row["content"] or "").strip()
+            reviewed_at = str(review_row["reviewed_at"] or "").strip()
+            if content:
+                review_fingerprints.add((content, reviewed_at))
+
+    cursor.execute(
+        """
+        SELECT id, text, source, source_type, created_at, metadata_json
+        FROM fi_feedback
+        WHERE tenant_id = ?
+        """,
+        (tenant_id,),
+    )
+    feedback_ids: List[int] = []
+    for row in cursor.fetchall():
+        try:
+            metadata = json.loads(row["metadata_json"] or "{}")
+        except Exception:
+            metadata = {}
+        if not isinstance(metadata, dict):
+            metadata = {}
+
+        bound_source_id: Optional[int] = None
+        try:
+            bound_source_id = int(str(metadata.get("cxm_source_id")).strip())
+        except (TypeError, ValueError):
+            bound_source_id = None
+
+        if bound_source_id == connector_id:
+            feedback_ids.append(int(row["id"]))
+            continue
+        if bound_source_id is not None:
+            # Explicitly linked to a different connector; do not infer-delete.
+            continue
+
+        row_source_type = str(row["source_type"] or "").strip().lower()
+        if source_type and row_source_type and row_source_type != source_type:
+            continue
+
+        metadata_source_identifier = str(metadata.get("cxm_source_identifier") or "").strip().lower()
+        if identifier and metadata_source_identifier and metadata_source_identifier == identifier.lower():
+            feedback_ids.append(int(row["id"]))
+            continue
+
+        metadata_source_name = str(metadata.get("cxm_source_name") or "").strip().lower()
+        if metadata_source_name and metadata_source_name in source_labels:
+            feedback_ids.append(int(row["id"]))
+            continue
+
+        row_source = str(row["source"] or "").strip().lower()
+        if row_source and row_source in source_labels:
+            feedback_ids.append(int(row["id"]))
+            continue
+
+        content = str(row["text"] or "").strip()
+        created_at = str(row["created_at"] or "").strip()
+        if content and (content, created_at) in review_fingerprints:
+            feedback_ids.append(int(row["id"]))
+
+    return feedback_ids
+
+
+def _collect_legacy_orphan_feedback_ids(cursor, tenant_id: int) -> List[int]:
+    if not _table_exists(cursor, "fi_feedback") or not _table_exists(cursor, "cxm_sources"):
+        return []
+
+    cursor.execute(
+        """
+        SELECT id, source_type, identifier, display_name
+        FROM cxm_sources
+        WHERE tenant_id = ? AND is_active = 1
+        """,
+        (tenant_id,),
+    )
+    active_source_ids: set[int] = set()
+    active_identifiers_by_type: Dict[str, set[str]] = {}
+    active_labels_by_type: Dict[str, set[str]] = {}
+    for row in cursor.fetchall():
+        source_id = int(row["id"])
+        active_source_ids.add(source_id)
+
+        source_type = str(row["source_type"] or "").strip().lower()
+        if not source_type:
+            continue
+
+        identifier = str(row["identifier"] or "").strip()
+        display_name = str(row["display_name"] or "").strip()
+        identifiers = active_identifiers_by_type.setdefault(source_type, set())
+        labels = active_labels_by_type.setdefault(source_type, set())
+
+        if identifier:
+            identifiers.add(identifier.lower())
+            labels.add(identifier.lower())
+        if display_name:
+            labels.add(display_name.lower())
+        if display_name and identifier and display_name.lower() != identifier.lower():
+            labels.add(f"{display_name} ({identifier})".strip().lower())
+
+    cursor.execute(
+        """
+        SELECT id, source, source_type, metadata_json
+        FROM fi_feedback
+        WHERE tenant_id = ?
+        """,
+        (tenant_id,),
+    )
+
+    connector_source_types = {
+        "playstore",
+        "appstore",
+        "trustpilot",
+        "surveymonkey",
+        "typeform",
+        "crm",
+        "salesforce",
+        "generic_api",
+        "api",
+        "webhook",
+        "csv",
+    }
+    manual_source_types = {"", "manual", "other", "feedback_crm", "workspace", "app_review"}
+
+    orphan_ids: List[int] = []
+    for row in cursor.fetchall():
+        row_id = int(row["id"])
+        row_source_type = str(row["source_type"] or "").strip().lower()
+        row_source = str(row["source"] or "").strip().lower()
+
+        try:
+            metadata = json.loads(row["metadata_json"] or "{}")
+        except Exception:
+            metadata = {}
+        if not isinstance(metadata, dict):
+            metadata = {}
+
+        bound_source_id: Optional[int] = None
+        try:
+            bound_source_id = int(str(metadata.get("cxm_source_id")).strip())
+        except (TypeError, ValueError):
+            bound_source_id = None
+
+        if bound_source_id is not None:
+            if bound_source_id not in active_source_ids:
+                orphan_ids.append(row_id)
+            continue
+
+        if row_source_type in manual_source_types:
+            continue
+
+        metadata_source_identifier = str(metadata.get("cxm_source_identifier") or "").strip().lower()
+        metadata_source_name = str(metadata.get("cxm_source_name") or "").strip().lower()
+        row_identifiers = active_identifiers_by_type.get(row_source_type, set())
+        row_labels = active_labels_by_type.get(row_source_type, set())
+
+        has_active_match = False
+        if metadata_source_identifier and metadata_source_identifier in row_identifiers:
+            has_active_match = True
+        elif metadata_source_name and metadata_source_name in row_labels:
+            has_active_match = True
+        elif row_source and row_source in row_labels:
+            has_active_match = True
+
+        if has_active_match:
+            continue
+
+        has_cxm_marker = any(str(key).startswith("cxm_") for key in metadata.keys())
+        if has_cxm_marker or row_source_type in connector_source_types:
+            orphan_ids.append(row_id)
+
+    return orphan_ids
+
+
+def _purge_legacy_orphan_feedback_rows(cursor, tenant_id: int) -> Dict[str, int]:
+    cleanup_counts = {
+        "fi_feedback_deleted": 0,
+        "fi_outreach_drafts_deleted": 0,
+        "fi_analysis_results_deleted": 0,
+        "fi_customers_deleted": 0,
+        "fi_issues_deleted": 0,
+    }
+
+    orphan_feedback_ids = _collect_legacy_orphan_feedback_ids(cursor, tenant_id)
+    if not orphan_feedback_ids:
+        return cleanup_counts
+
+    cleanup_counts["fi_outreach_drafts_deleted"] = _delete_rows_by_ids(
+        cursor,
+        "fi_outreach_drafts",
+        "feedback_id",
+        orphan_feedback_ids,
+    )
+    cleanup_counts["fi_analysis_results_deleted"] = _delete_rows_by_ids(
+        cursor,
+        "fi_analysis_results",
+        "feedback_id",
+        orphan_feedback_ids,
+    )
+    cleanup_counts["fi_feedback_deleted"] = _delete_rows_by_ids(
+        cursor,
+        "fi_feedback",
+        "id",
+        orphan_feedback_ids,
+    )
+
+    orphan_cleanup = _cleanup_feedback_crm_orphans(cursor, tenant_id)
+    cleanup_counts["fi_outreach_drafts_deleted"] += orphan_cleanup["outreach_drafts_deleted"]
+    cleanup_counts["fi_analysis_results_deleted"] += orphan_cleanup["analysis_results_deleted"]
+    cleanup_counts["fi_customers_deleted"] = orphan_cleanup["customers_deleted"]
+    cleanup_counts["fi_issues_deleted"] = orphan_cleanup["issues_deleted"]
+    return cleanup_counts
+
+
+def _cleanup_feedback_crm_orphans(cursor, tenant_id: int) -> Dict[str, int]:
+    cleanup_counts = {
+        "customers_deleted": 0,
+        "issues_deleted": 0,
+        "analysis_results_deleted": 0,
+        "outreach_drafts_deleted": 0,
+    }
+
+    if _table_exists(cursor, "fi_outreach_drafts") and _table_exists(cursor, "fi_feedback"):
+        cursor.execute(
+            """
+            DELETE FROM fi_outreach_drafts
+            WHERE tenant_id = ?
+              AND feedback_id NOT IN (
+                  SELECT id FROM fi_feedback WHERE tenant_id = ?
+              )
+            """,
+            (tenant_id, tenant_id),
+        )
+        cleanup_counts["outreach_drafts_deleted"] = cursor.rowcount or 0
+
+    if _table_exists(cursor, "fi_analysis_results"):
+        if _table_exists(cursor, "fi_feedback"):
+            cursor.execute(
+                """
+                DELETE FROM fi_analysis_results
+                WHERE tenant_id = ?
+                  AND feedback_id NOT IN (
+                      SELECT id FROM fi_feedback WHERE tenant_id = ?
+                  )
+                """,
+                (tenant_id, tenant_id),
+            )
+            cleanup_counts["analysis_results_deleted"] += cursor.rowcount or 0
+        if _table_exists(cursor, "fi_analysis_runs"):
+            cursor.execute(
+                """
+                DELETE FROM fi_analysis_results
+                WHERE tenant_id = ?
+                  AND analysis_run_id NOT IN (
+                      SELECT id FROM fi_analysis_runs WHERE tenant_id = ?
+                  )
+                """,
+                (tenant_id, tenant_id),
+            )
+            cleanup_counts["analysis_results_deleted"] += cursor.rowcount or 0
+
+    if _table_exists(cursor, "fi_customers") and _table_exists(cursor, "fi_feedback"):
+        cursor.execute(
+            """
+            DELETE FROM fi_customers
+            WHERE tenant_id = ?
+              AND id NOT IN (
+                  SELECT DISTINCT customer_id
+                  FROM fi_feedback
+                  WHERE tenant_id = ? AND customer_id IS NOT NULL
+              )
+            """,
+            (tenant_id, tenant_id),
+        )
+        cleanup_counts["customers_deleted"] = cursor.rowcount or 0
+
+    if _table_exists(cursor, "fi_issues") and _table_exists(cursor, "fi_feedback"):
+        cursor.execute(
+            """
+            DELETE FROM fi_issues
+            WHERE tenant_id = ?
+              AND id NOT IN (
+                  SELECT DISTINCT issue_id
+                  FROM fi_feedback
+                  WHERE tenant_id = ? AND issue_id IS NOT NULL
+              )
+            """,
+            (tenant_id, tenant_id),
+        )
+        cleanup_counts["issues_deleted"] = cursor.rowcount or 0
+
+    return cleanup_counts
+
+
+def _purge_connector_loaded_data(cursor, connector: Dict[str, Any]) -> Dict[str, int]:
+    connector_id = int(connector["id"])
+    tenant_id = int(connector["tenant_id"])
+    source_type = str(connector.get("source_type") or "").strip()
+    identifier = str(connector.get("identifier") or "").strip()
+    workspace_id = connector.get("workspace_id")
+
+    cleanup_counts = {
+        "raw_reviews_deleted": 0,
+        "cxm_reviews_deleted": 0,
+        "fi_feedback_deleted": 0,
+        "fi_outreach_drafts_deleted": 0,
+        "fi_analysis_results_deleted": 0,
+        "fi_analysis_runs_deleted": 0,
+        "fi_analysis_runs_updated": 0,
+        "fi_fetch_runs_deleted": 0,
+        "fi_fetch_runs_updated": 0,
+        "fi_customers_deleted": 0,
+        "fi_issues_deleted": 0,
+    }
+
+    if source_type and identifier and _table_exists(cursor, "raw_reviews"):
+        if workspace_id is None:
+            cursor.execute(
+                """
+                DELETE FROM raw_reviews
+                WHERE tenant_id = ?
+                  AND LOWER(TRIM(source_type)) = LOWER(TRIM(?))
+                  AND LOWER(TRIM(identifier)) = LOWER(TRIM(?))
+                  AND workspace_id IS NULL
+                """,
+                (tenant_id, source_type, identifier),
+            )
+        else:
+            cursor.execute(
+                """
+                DELETE FROM raw_reviews
+                WHERE tenant_id = ?
+                  AND LOWER(TRIM(source_type)) = LOWER(TRIM(?))
+                  AND LOWER(TRIM(identifier)) = LOWER(TRIM(?))
+                  AND workspace_id = ?
+                """,
+                (tenant_id, source_type, identifier, workspace_id),
+            )
+        cleanup_counts["raw_reviews_deleted"] = cursor.rowcount or 0
+
+    cleanup_counts["cxm_reviews_deleted"] = _delete_rows_with_params(
+        cursor,
+        "cxm_reviews",
+        "source_id = ? AND tenant_id = ?",
+        (connector_id, tenant_id),
+    )
+
+    feedback_ids = _collect_feedback_ids_for_connector(
+        cursor,
+        tenant_id,
+        connector_id,
+        connector=connector,
+    )
+    cleanup_counts["fi_outreach_drafts_deleted"] = _delete_rows_by_ids(
+        cursor,
+        "fi_outreach_drafts",
+        "feedback_id",
+        feedback_ids,
+    )
+    cleanup_counts["fi_analysis_results_deleted"] = _delete_rows_by_ids(
+        cursor,
+        "fi_analysis_results",
+        "feedback_id",
+        feedback_ids,
+    )
+    cleanup_counts["fi_feedback_deleted"] = _delete_rows_by_ids(
+        cursor,
+        "fi_feedback",
+        "id",
+        feedback_ids,
+    )
+
+    analysis_run_changes = _update_source_id_lists(
+        cursor,
+        "fi_analysis_runs",
+        tenant_id,
+        connector_id,
+    )
+    cleanup_counts["fi_analysis_runs_deleted"] = analysis_run_changes["deleted"]
+    cleanup_counts["fi_analysis_runs_updated"] = analysis_run_changes["updated"]
+
+    fetch_run_changes = _update_source_id_lists(
+        cursor,
+        "fi_fetch_runs",
+        tenant_id,
+        connector_id,
+    )
+    cleanup_counts["fi_fetch_runs_deleted"] = fetch_run_changes["deleted"]
+    cleanup_counts["fi_fetch_runs_updated"] = fetch_run_changes["updated"]
+
+    orphan_cleanup = _cleanup_feedback_crm_orphans(cursor, tenant_id)
+    cleanup_counts["fi_outreach_drafts_deleted"] += orphan_cleanup["outreach_drafts_deleted"]
+    cleanup_counts["fi_analysis_results_deleted"] += orphan_cleanup["analysis_results_deleted"]
+    cleanup_counts["fi_customers_deleted"] = orphan_cleanup["customers_deleted"]
+    cleanup_counts["fi_issues_deleted"] = orphan_cleanup["issues_deleted"]
+    return cleanup_counts
+
+
+def delete_user_connector(connector_id: int, tenant_id: int) -> Dict[str, Any]:
+    """Remove a connector and purge its loaded review data for the tenant."""
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute('UPDATE cxm_sources SET is_active = 0 WHERE id = ? AND tenant_id = ?', (connector_id, tenant_id))
+    cursor.execute(
+        "SELECT * FROM cxm_sources WHERE id = ? AND tenant_id = ?",
+        (connector_id, tenant_id),
+    )
+    row = cursor.fetchone()
+    if not row:
+        conn.close()
+        return {"connector_deleted": False}
+
+    connector = dict(row)
+    cleanup_counts = _purge_connector_loaded_data(cursor, connector)
+    cursor.execute(
+        "DELETE FROM cxm_sources WHERE id = ? AND tenant_id = ?",
+        (connector_id, tenant_id),
+    )
+    connector_deleted = (cursor.rowcount or 0) > 0
     conn.commit()
     conn.close()
+    return {
+        "connector_deleted": connector_deleted,
+        "connector_id": connector_id,
+        **cleanup_counts,
+    }
+
+
+def purge_inactive_connectors(
+    tenant_id: int,
+    *,
+    user_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    """
+    Permanently remove inactive connectors and purge their loaded data.
+    This is a safety cleanup for legacy soft-deleted connector rows.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    result = {
+        "tenant_id": tenant_id,
+        "inactive_connectors_found": 0,
+        "inactive_connectors_deleted": 0,
+        "raw_reviews_deleted": 0,
+        "cxm_reviews_deleted": 0,
+        "fi_feedback_deleted": 0,
+        "fi_outreach_drafts_deleted": 0,
+        "fi_analysis_results_deleted": 0,
+        "fi_analysis_runs_deleted": 0,
+        "fi_analysis_runs_updated": 0,
+        "fi_fetch_runs_deleted": 0,
+        "fi_fetch_runs_updated": 0,
+        "fi_customers_deleted": 0,
+        "fi_issues_deleted": 0,
+    }
+
+    if not _table_exists(cursor, "cxm_sources"):
+        conn.close()
+        return result
+
+    query = "SELECT * FROM cxm_sources WHERE tenant_id = ? AND is_active = 0"
+    params: List[Any] = [tenant_id]
+    if user_id is not None:
+        query += " AND user_id = ?"
+        params.append(user_id)
+    cursor.execute(query, params)
+    inactive_connectors = [dict(row) for row in cursor.fetchall()]
+    result["inactive_connectors_found"] = len(inactive_connectors)
+
+    connector_ids: List[int] = []
+    for connector in inactive_connectors:
+        connector_id = int(connector["id"])
+        connector_ids.append(connector_id)
+        cleanup_counts = _purge_connector_loaded_data(cursor, connector)
+        for key in (
+            "raw_reviews_deleted",
+            "cxm_reviews_deleted",
+            "fi_feedback_deleted",
+            "fi_outreach_drafts_deleted",
+            "fi_analysis_results_deleted",
+            "fi_analysis_runs_deleted",
+            "fi_analysis_runs_updated",
+            "fi_fetch_runs_deleted",
+            "fi_fetch_runs_updated",
+            "fi_customers_deleted",
+            "fi_issues_deleted",
+        ):
+            result[key] += int(cleanup_counts.get(key, 0) or 0)
+
+    result["inactive_connectors_deleted"] = _delete_rows_by_ids(
+        cursor,
+        "cxm_sources",
+        "id",
+        connector_ids,
+    )
+
+    legacy_cleanup = _purge_legacy_orphan_feedback_rows(cursor, tenant_id)
+    result["fi_feedback_deleted"] += int(legacy_cleanup.get("fi_feedback_deleted", 0) or 0)
+    result["fi_outreach_drafts_deleted"] += int(legacy_cleanup.get("fi_outreach_drafts_deleted", 0) or 0)
+    result["fi_analysis_results_deleted"] += int(legacy_cleanup.get("fi_analysis_results_deleted", 0) or 0)
+    result["fi_customers_deleted"] += int(legacy_cleanup.get("fi_customers_deleted", 0) or 0)
+    result["fi_issues_deleted"] += int(legacy_cleanup.get("fi_issues_deleted", 0) or 0)
+
+    conn.commit()
+    conn.close()
+    return result
+
+
+def reset_tenant_connector_data(
+    tenant_id: int,
+    *,
+    user_id: Optional[int] = None,
+    preserve_active_connectors: bool = True,
+) -> Dict[str, Any]:
+    """Clear loaded review data for a tenant while optionally keeping active connector setups."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    result = {
+        "tenant_id": tenant_id,
+        "analysis_history_deleted": 0,
+        "raw_reviews_deleted": 0,
+        "cxm_reviews_deleted": 0,
+        "fi_outreach_drafts_deleted": 0,
+        "fi_analysis_results_deleted": 0,
+        "fi_analysis_runs_deleted": 0,
+        "fi_fetch_runs_deleted": 0,
+        "fi_feedback_deleted": 0,
+        "fi_customers_deleted": 0,
+        "fi_issues_deleted": 0,
+        "inactive_connectors_deleted": 0,
+        "active_connectors_preserved": 0,
+    }
+
+    scoped_connectors: List[Dict[str, Any]] = []
+    if _table_exists(cursor, "cxm_sources"):
+        connector_query = "SELECT id, is_active FROM cxm_sources WHERE tenant_id = ?"
+        connector_params: List[Any] = [tenant_id]
+        if user_id is not None:
+            connector_query += " AND user_id = ?"
+            connector_params.append(user_id)
+        cursor.execute(connector_query, connector_params)
+        scoped_connectors = [dict(row) for row in cursor.fetchall()]
+
+    result["analysis_history_deleted"] = _delete_rows_with_params(
+        cursor,
+        "analysis_history",
+        "tenant_id = ?",
+        (tenant_id,),
+    )
+    result["fi_outreach_drafts_deleted"] = _delete_rows_with_params(
+        cursor,
+        "fi_outreach_drafts",
+        "tenant_id = ?",
+        (tenant_id,),
+    )
+    result["fi_analysis_results_deleted"] = _delete_rows_with_params(
+        cursor,
+        "fi_analysis_results",
+        "tenant_id = ?",
+        (tenant_id,),
+    )
+    result["fi_analysis_runs_deleted"] = _delete_rows_with_params(
+        cursor,
+        "fi_analysis_runs",
+        "tenant_id = ?",
+        (tenant_id,),
+    )
+    result["fi_fetch_runs_deleted"] = _delete_rows_with_params(
+        cursor,
+        "fi_fetch_runs",
+        "tenant_id = ?",
+        (tenant_id,),
+    )
+    result["fi_feedback_deleted"] = _delete_rows_with_params(
+        cursor,
+        "fi_feedback",
+        "tenant_id = ?",
+        (tenant_id,),
+    )
+    result["fi_customers_deleted"] = _delete_rows_with_params(
+        cursor,
+        "fi_customers",
+        "tenant_id = ?",
+        (tenant_id,),
+    )
+    result["fi_issues_deleted"] = _delete_rows_with_params(
+        cursor,
+        "fi_issues",
+        "tenant_id = ?",
+        (tenant_id,),
+    )
+    result["cxm_reviews_deleted"] = _delete_rows_with_params(
+        cursor,
+        "cxm_reviews",
+        "tenant_id = ?",
+        (tenant_id,),
+    )
+    result["raw_reviews_deleted"] = _delete_rows_with_params(
+        cursor,
+        "raw_reviews",
+        "tenant_id = ?",
+        (tenant_id,),
+    )
+
+    if _table_exists(cursor, "cxm_sources"):
+        active_connector_ids = [
+            int(row["id"])
+            for row in scoped_connectors
+            if bool(row.get("is_active"))
+        ]
+        inactive_connector_ids = [
+            int(row["id"])
+            for row in scoped_connectors
+            if not bool(row.get("is_active"))
+        ]
+
+        if preserve_active_connectors:
+            result["inactive_connectors_deleted"] = _delete_rows_by_ids(
+                cursor,
+                "cxm_sources",
+                "id",
+                inactive_connector_ids,
+            )
+            if active_connector_ids:
+                placeholders = ",".join("?" * len(active_connector_ids))
+                cursor.execute(
+                    f"""
+                    UPDATE cxm_sources
+                    SET last_fetched_at = NULL,
+                        last_analyzed_at = NULL
+                    WHERE id IN ({placeholders})
+                    """,
+                    active_connector_ids,
+                )
+            result["active_connectors_preserved"] = len(active_connector_ids)
+        else:
+            connector_scope_query = "tenant_id = ?"
+            connector_scope_params: List[Any] = [tenant_id]
+            if user_id is not None:
+                connector_scope_query += " AND user_id = ?"
+                connector_scope_params.append(user_id)
+            deleted_connectors = _delete_rows_with_params(
+                cursor,
+                "cxm_sources",
+                connector_scope_query,
+                tuple(connector_scope_params),
+            )
+            result["inactive_connectors_deleted"] = deleted_connectors
+            result["active_connectors_preserved"] = 0
+
+    conn.commit()
+    conn.close()
+    return result
 
 # ==================== RAW REVIEWS CACHING ====================
 
@@ -2153,20 +2903,53 @@ def save_raw_reviews(user_id: int, tenant_id: int, source_type: str, identifier:
     # print(f"[DB] Saving {len(reviews)} raw reviews for {source_type}:{identifier}")
     print(f"[DB] Saving {len(reviews)} raw reviews for {source_type}:{identifier}")
 
+    def _scoped_external_id(raw_external_id: str) -> str:
+        tenant_part = tenant_id if tenant_id is not None else 0
+        workspace_part = workspace_id if workspace_id is not None else 0
+        base = str(raw_external_id or '').strip()
+        if base:
+            return f"{base}::tenant={tenant_part}::workspace={workspace_part}"
+        return f"tenant={tenant_part}::workspace={workspace_part}"
+
     for r in reviews:
         # Standardize Play Store / generic IDs
         external_id = str(r.get('reviewId') or r.get('id') or '').strip()
+        stored_external_id = _scoped_external_id(external_id)
         content = r.get('content', '').strip()
         score = r.get('score', 3)
         author = str(r.get('author') or r.get('userName') or 'Anonymous')
         at = r.get('date') or r.get('at')
+
+        if not content:
+            skipped += 1
+            continue
+
+        if workspace_id is None:
+            cursor.execute('''
+                SELECT 1
+                FROM raw_reviews
+                WHERE tenant_id = ? AND source_type = ? AND identifier = ? AND content = ?
+                  AND (external_id = ? OR external_id = ? OR (? = '' AND (external_id IS NULL OR external_id = '')))
+                LIMIT 1
+            ''', (tenant_id, source_type, identifier, content, stored_external_id, external_id, external_id))
+        else:
+            cursor.execute('''
+                SELECT 1
+                FROM raw_reviews
+                WHERE tenant_id = ? AND workspace_id = ? AND source_type = ? AND identifier = ? AND content = ?
+                  AND (external_id = ? OR external_id = ? OR (? = '' AND (external_id IS NULL OR external_id = '')))
+                LIMIT 1
+            ''', (tenant_id, workspace_id, source_type, identifier, content, stored_external_id, external_id, external_id))
+        if cursor.fetchone():
+            skipped += 1
+            continue
 
         try:
             cursor.execute('''
                 INSERT OR IGNORE INTO raw_reviews
                     (user_id, tenant_id, workspace_id, source_type, identifier, external_id, content, score, author, at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (user_id, tenant_id, workspace_id, source_type, identifier, external_id, content, score, author, at))
+            ''', (user_id, tenant_id, workspace_id, source_type, identifier, stored_external_id, content, score, author, at))
             if int(cursor.rowcount) > 0:
                 added += 1
             else:
@@ -2188,17 +2971,21 @@ def get_raw_review_stats(user_id: int, tenant_id: int, source_type: str, identif
     if workspace_id is not None:
         cursor.execute('''
             SELECT COUNT(*) as total,
-                   SUM(CASE WHEN is_analyzed = 0 THEN 1 ELSE 0 END) as unanalyzed
+                   COALESCE(SUM(CASE WHEN is_analyzed = 0 THEN 1 ELSE 0 END), 0) as unanalyzed
             FROM raw_reviews
             WHERE tenant_id = ? AND source_type = ? AND identifier = ? AND workspace_id = ?
         ''', (tenant_id, source_type, identifier, workspace_id))
-    else:
-        cursor.execute('''
-            SELECT COUNT(*) as total,
-                   SUM(CASE WHEN is_analyzed = 0 THEN 1 ELSE 0 END) as unanalyzed
-            FROM raw_reviews
-            WHERE tenant_id = ? AND source_type = ? AND identifier = ?
-        ''', (tenant_id, source_type, identifier))
+        row = cursor.fetchone()
+        if row and int(row["total"] or 0) > 0:
+            conn.close()
+            return dict(row)
+
+    cursor.execute('''
+        SELECT COUNT(*) as total,
+               COALESCE(SUM(CASE WHEN is_analyzed = 0 THEN 1 ELSE 0 END), 0) as unanalyzed
+        FROM raw_reviews
+        WHERE tenant_id = ? AND source_type = ? AND identifier = ?
+    ''', (tenant_id, source_type, identifier))
     row = cursor.fetchone()
     conn.close()
 
@@ -2216,12 +3003,16 @@ def get_latest_raw_reviews(user_id: int, tenant_id: int, source_type: str, ident
             WHERE tenant_id = ? AND source_type = ? AND identifier = ? AND workspace_id = ?
             ORDER BY at DESC, created_at DESC LIMIT ?
         ''', (tenant_id, source_type, identifier, workspace_id, limit))
-    else:
-        cursor.execute('''
-            SELECT * FROM raw_reviews
-            WHERE tenant_id = ? AND source_type = ? AND identifier = ?
-            ORDER BY at DESC, created_at DESC LIMIT ?
-        ''', (tenant_id, source_type, identifier, limit))
+        rows = cursor.fetchall()
+        if rows:
+            conn.close()
+            return [dict(r) for r in rows]
+
+    cursor.execute('''
+        SELECT * FROM raw_reviews
+        WHERE tenant_id = ? AND source_type = ? AND identifier = ?
+        ORDER BY at DESC, created_at DESC LIMIT ?
+    ''', (tenant_id, source_type, identifier, limit))
     rows = cursor.fetchall()
     conn.close()
 
@@ -2351,6 +3142,8 @@ def crm_get_profiles(user_id: int, tenant_id: int, workspace_id: Optional[int] =
           (SELECT ca.avg_sentiment FROM crm_analyses ca WHERE ca.profile_id=p.id AND ca.tenant_id=p.tenant_id ORDER BY ca.run_at DESC LIMIT 1) AS latest_sentiment,
           (SELECT ca.churn_probability FROM crm_analyses ca WHERE ca.profile_id=p.id AND ca.tenant_id=p.tenant_id ORDER BY ca.run_at DESC LIMIT 1) AS latest_churn,
           (SELECT ca.run_at FROM crm_analyses ca WHERE ca.profile_id=p.id AND ca.tenant_id=p.tenant_id ORDER BY ca.run_at DESC LIMIT 1) AS last_analyzed,
+          (SELECT ca.top_issue FROM crm_analyses ca WHERE ca.profile_id=p.id AND ca.tenant_id=p.tenant_id ORDER BY ca.run_at DESC LIMIT 1) AS latest_top_issue,
+          (SELECT ca.summary FROM crm_analyses ca WHERE ca.profile_id=p.id AND ca.tenant_id=p.tenant_id ORDER BY ca.run_at DESC LIMIT 1) AS latest_summary,
           (SELECT COUNT(*) FROM crm_feedbacks cf WHERE cf.profile_id=p.id AND cf.tenant_id=p.tenant_id) AS feedback_count
         FROM crm_profiles p
         WHERE p.tenant_id=? AND p.is_active=1
@@ -2840,7 +3633,7 @@ def cxm_create_source(user_id: int, tenant_id: int, source_type: str, identifier
                        workspace_id: Optional[int] = None) -> Optional[int]:
     conn = get_db_connection()
     cursor = conn.cursor()
-    valid_intervals = {"manual", "hourly", "daily", "weekly"}
+    valid_intervals = {"manual", "hourly", "daily", "weekly", "on_new"}
     fetch_interval = (fetch_interval or "daily").strip().lower()
     if fetch_interval not in valid_intervals:
         fetch_interval = "daily"

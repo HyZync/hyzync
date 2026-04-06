@@ -28,6 +28,8 @@ INTERVAL_MAP = {
     "hourly": {"hours": 1},
     "daily": {"hours": 24},
     "weekly": {"weeks": 1},
+    # Poll frequently and only ingest truly unseen reviews.
+    "on_new": {"minutes": 5},
     "manual": None,
 }
 
@@ -35,6 +37,7 @@ ANALYSIS_INTERVAL_SECONDS = {
     "hourly": 3600,
     "daily": 24 * 3600,
     "weekly": 7 * 24 * 3600,
+    "on_new": 5 * 60,
     "manual": None,
 }
 
@@ -438,11 +441,37 @@ def _do_fetch(
     if run_crm_ingestion_hooks:
         try:
             from feedback_ingestion import process_feedback
-
+            source_display_name = str(source.get("display_name") or "").strip()
+            source_identifier = str(source.get("identifier") or "").strip()
+            if source_display_name and source_identifier and source_display_name.lower() != source_identifier.lower():
+                source_label = f"{source_display_name} ({source_identifier})"
+            else:
+                source_label = source_display_name or source_identifier or source_type
             if tenant_id:
                 for review in new_reviews:
                     try:
-                        process_feedback(tenant_id, source_type, review)
+                        review_payload = dict(review or {})
+                        review_payload.setdefault("cxm_source_id", source_id)
+                        review_payload.setdefault("cxm_source_name", source_label)
+                        review_payload.setdefault("cxm_source_identifier", source_identifier or None)
+                        external_id = str(
+                            review_payload.get("external_id")
+                            or review_payload.get("reviewId")
+                            or review_payload.get("id")
+                            or ""
+                        ).strip()
+                        if external_id:
+                            review_payload.setdefault("cxm_external_id", external_id)
+                        reviewed_at = (
+                            review_payload.get("reviewed_at")
+                            or review_payload.get("at")
+                            or review_payload.get("date")
+                            or review_payload.get("created_at")
+                            or review_payload.get("updated_at")
+                        )
+                        if reviewed_at:
+                            review_payload.setdefault("cxm_reviewed_at", str(reviewed_at))
+                        process_feedback(tenant_id, source_type, review_payload)
                     except Exception as fi_err:
                         logger.warning(f"[CRM Hook] Review ingest failed for source {source_id}: {fi_err}")
         except Exception as e:
@@ -614,7 +643,8 @@ def init_scheduler():
             except Exception:
                 cfg = {}
             scope = str(cfg.get("_scope") or cfg.get("integration_scope") or "workspace").strip().lower()
-            if scope == "feedback_crm":
+            interval = str(row["fetch_interval"] or "").strip().lower()
+            if scope == "feedback_crm" and interval != "on_new":
                 continue
             schedule_source(row["id"], row["fetch_interval"])
     except Exception as e:
@@ -633,6 +663,12 @@ def schedule_source(source_id: int, fetch_interval: str):
     """Add or replace a scheduler job for a source."""
     if not HAS_APScheduler or not _scheduler:
         return
+    fetch_interval = str(fetch_interval or "").strip().lower()
+    job_id = f"cxm_source_{source_id}"
+    # Always remove stale jobs first so interval transitions do not leave old schedules behind.
+    if _scheduler.get_job(job_id):
+        _scheduler.remove_job(job_id)
+
     interval_kwargs = INTERVAL_MAP.get(fetch_interval)
     if not interval_kwargs:
         return
@@ -649,14 +685,13 @@ def schedule_source(source_id: int, fetch_interval: str):
             except Exception:
                 cfg = {}
             scope = str(cfg.get("_scope") or cfg.get("integration_scope") or "workspace").strip().lower()
-            if scope == "feedback_crm":
-                logger.info(f"[CXM Scheduler] Skipping auto-schedule for Feedback CRM source {source_id}")
+            if scope == "feedback_crm" and fetch_interval != "on_new":
+                logger.info(
+                    f"[CXM Scheduler] Skipping auto-schedule for Feedback CRM source {source_id} interval={fetch_interval}"
+                )
                 return
     except Exception:
         pass
-    job_id = f"cxm_source_{source_id}"
-    if _scheduler.get_job(job_id):
-        _scheduler.remove_job(job_id)
     _scheduler.add_job(
         _do_fetch,
         trigger=IntervalTrigger(**interval_kwargs),
